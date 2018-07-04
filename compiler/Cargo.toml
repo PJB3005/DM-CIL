@@ -1,0 +1,7 @@
+[package]
+name = "compiler"
+version = "0.1.0"
+authors = ["PJB3005 <pieterjan.briers+git@gmail.com>"]
+
+[dependencies]
+dreammaker = { path = "../../SpacemanDMM/src/dreammaker" }
