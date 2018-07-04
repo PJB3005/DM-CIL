@@ -30,8 +30,7 @@ fn main() {
 .assembly extern mscorlib {{ }}
 .assembly 'derp' {{ }}
 .module derp.exe
-
-    ").unwrap();
+").unwrap();
 
     write_node(&mut file, &tree, tree.root());
 
