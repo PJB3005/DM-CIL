@@ -130,8 +130,6 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
     match statement {
         Statement::Expr(exp) => {
             evaluate_expression(exp, true, data, ins);
-            // Pop the expression off again. Don't need it.
-            ins.instruction(Instruction::pop);
         },
         Statement::Var { name, value, .. } => {
             let idx = data.add_local(name);
@@ -140,12 +138,6 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
                 ins.instruction(Instruction::stloc(idx));
             }
         },
-        Statement::Setting(name, SettingMode::Assign, exp) => {
-            if let Some(idx) = data.get_local(name) {
-                evaluate_expression(exp, false, data, ins);
-                ins.instruction(Instruction::stloc(idx));
-            }
-        }
         _ => {
             ins.not_implemented("Unknown Statement.");
         }
@@ -153,7 +145,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
 }
 
 fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &mut TranspilerData, ins: &mut InstructionBlob) {
-    // RULE: when this function is done, there is ONE extra value on the stack.
+    // RULE: when this function is done, ONE extra value on the stack ONLY if will_be_discarded is false.
     match expression {
         Expression::Base { unary, term, follow } => {
             let mut term_blob = InstructionBlob::default();
@@ -169,16 +161,31 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             }
 
             ins.absord(term_blob);
-            if will_be_discarded {
-                ins.instruction(Instruction::ldnull);
-            }
         },
         Expression::BinaryOp { op, lhs, rhs } => {
             let mut arg_blob = InstructionBlob::default();
             evaluate_expression(lhs, false, data, &mut arg_blob);
             evaluate_expression(rhs, false, data, &mut arg_blob);
             do_dynamic_invoke(DynamicInvokeType::BinaryOp(*op), arg_blob, data, ins);
+            if will_be_discarded {
+                ins.instruction(Instruction::pop);
+            }
         },
+        Expression::AssignOp { op: AssignOp::Assign, lhs, rhs } => {
+            if let Expression::Base { term: Term::Ident(varname), .. } = *lhs.clone() {
+                if let Some(idx) = data.get_local(&varname) {
+                    evaluate_expression(rhs, false, data, ins);
+                    if !will_be_discarded {
+                        ins.instruction(Instruction::dup);
+                    }
+                    ins.instruction(Instruction::stloc(idx));
+                } else {
+                    ins.not_implemented("No idea what var that is lad.");
+                }
+            } else {
+                ins.not_implemented("That lvalue is too complex for me.");
+            }
+        }
         _ => {
             ins.not_implemented("Unable to handle expression type.");
         }
