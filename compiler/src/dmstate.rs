@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::io;
 use dm::annotation::{AnnotationTree, Iter};
 use dm::objtree::ObjectTree;
 use dm::{Context, Severity, Location};
@@ -13,11 +14,11 @@ pub(crate) struct DMState {
 }
 
 impl DMState {
-    pub fn load<P: AsRef<Path>>(path: P) -> DMState {
+    pub fn load<P: AsRef<Path>>(path: P) -> io::Result<DMState> {
         let mut at = AnnotationTree::default();
         let tree = {
             let context = Context::default();
-            let preprocess = Preprocessor::new(&context, path.as_ref().to_owned()).unwrap();
+            let preprocess = Preprocessor::new(&context, path.as_ref().to_owned())?;
             let indents = IndentProcessor::new::<Preprocessor>(&context, preprocess);
             let mut parser = Parser::new(&context, indents);
             parser.annotate_to(&mut at);
@@ -29,10 +30,10 @@ impl DMState {
             tree
         };
 
-        DMState {
+        Ok(DMState {
             annotations: at,
             tree: tree
-        }
+        })
     }
 
     pub fn get_tree(&self) -> &ObjectTree {

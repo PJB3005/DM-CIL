@@ -1,21 +1,26 @@
 use std::fmt;
+use std::io;
 
+#[derive(Default)]
 pub struct Field {
-    name: String,
-    type_name: String,
-    accessibility: FieldAccessibility
+    pub name: String,
+    pub type_name: String,
+    pub accessibility: FieldAccessibility,
+    pub is_static: bool,
 }
 
 impl Field {
-    pub fn new(name: String, type_name: String, accessibility: FieldAccessibility) -> Field {
-        Field {
-            name, type_name, accessibility
-        }
+    pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        writeln!(writer, ".field {} {} {} '{}'",
+                 self.accessibility,
+                 if self.is_static { "static" } else { "" },
+                 self.type_name, self.name)
     }
 }
 
 /// Field attributes corresponding to accessibility.
 /// Spec II.16.1
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum FieldAccessibility {
     CompilerControlled,
@@ -25,6 +30,12 @@ pub enum FieldAccessibility {
     FamilyAndAssembly,
     FamilyOrAssembly,
     Family,
+}
+
+impl Default for FieldAccessibility {
+    fn default() -> FieldAccessibility {
+        FieldAccessibility::Private
+    }
 }
 
 impl fmt::Display for FieldAccessibility {
