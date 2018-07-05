@@ -83,6 +83,7 @@ pub enum Instruction {
     stloc0,
     stsfld(String),
     throw,
+    unbox(String),
 }
 
 impl fmt::Display for Instruction {
@@ -120,6 +121,7 @@ impl fmt::Display for Instruction {
             stloc0 => write!(f, "stloc.0"),
             stsfld(field) => write!(f, "stsfld {}", field),
             throw => write!(f, "throw"),
+            unbox(meta) => write!(f, "unbox {}", meta),
         }
     }
 }

@@ -138,6 +138,28 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
                 ins.instruction(Instruction::stloc(idx));
             }
         },
+        Statement::While(exp, statements) => {
+            data.push_scope();
+            let uniq = data.get_uniq();
+            let test_label = format!("w_{}", uniq);
+            let exit_label = format!("e_{}", uniq);
+
+            ins.label(test_label.clone());
+            evaluate_expression(exp, false, data, ins);
+            ins.instruction(Instruction::unbox("[mscorlib]System.Single".to_owned()));
+            ins.instruction(Instruction::brfalse(exit_label.clone()));
+
+            for statement in statements {
+                write_statement(statement, data, ins);
+            }
+
+            ins.instruction(Instruction::br(test_label));
+
+            ins.label(exit_label);
+            ins.instruction(Instruction::nop);
+
+            data.pop_scope();
+        }
         _ => {
             ins.not_implemented("Unknown Statement.");
         }
