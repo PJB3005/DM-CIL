@@ -68,6 +68,7 @@ pub enum Instruction {
     ldcr4(f32),
     ldfld(String),
     ldloc(u16),
+    ldloc0,
     ldnull,
     ldsfld(String),
     ldstr(String),
@@ -78,6 +79,8 @@ pub enum Instruction {
     pop,
     ret,
     stelemref,
+    stloc(u16),
+    stloc0,
     stsfld(String),
     throw,
 }
@@ -101,6 +104,7 @@ impl fmt::Display for Instruction {
             ldci4(num) => write!(f, "ldc.i4 {}", num),
             ldcr4(num) => write!(f, "ldc.r4 {}", num),
             ldfld(field) => write!(f, "ldfld {}", field),
+            ldloc0 => write!(f, "ldloc.0"),
             ldloc(idx) => write!(f, "ldloc {}", idx),
             ldnull => write!(f, "ldnull"),
             ldsfld(field) => write!(f, "ldsfld {}", field),
@@ -112,6 +116,8 @@ impl fmt::Display for Instruction {
             pop => write!(f, "pop"),
             ret => write!(f, "ret"),
             stelemref => write!(f, "stelem.ref"),
+            stloc(idx) => write!(f, "stloc {}", idx),
+            stloc0 => write!(f, "stloc.0"),
             stsfld(field) => write!(f, "stsfld {}", field),
             throw => write!(f, "throw"),
         }

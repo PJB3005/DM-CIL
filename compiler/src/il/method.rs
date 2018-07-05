@@ -72,6 +72,7 @@ impl Method {
                 }
                 write!(writer, "[{}] {}", i, local)?;
             }
+            write!(writer, ")")?;
         }
 
         self.code.write(writer)?;

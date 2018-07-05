@@ -10,7 +10,8 @@ use super::dmstate::DMState;
 pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str, is_static: bool, state: &DMState) -> Method {
     println!("{}: {:?}", proc_name, procdef);
     
-    let return_type = if proc_name == "EntryPoint" {
+    let is_entry_point = proc_name == "EntryPoint";
+    let return_type = if is_entry_point {
         "void".to_owned()
     } else {
         "object".to_owned()
@@ -18,7 +19,8 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
 
     if let Some(code) = get_proc_body_details(procdef, state) {
         let mut data = TranspilerData {
-            locals: HashMap::new(),
+            total_locals: 1,
+            locals: vec![HashMap::new()],
             uniques: 0,
             state,
             class,
@@ -26,16 +28,25 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
             is_static,
         };
         let mut ins = InstructionBlob::default();
+        // Load null into . (default return value.)
+        ins.instruction(Instruction::ldnull);
+        ins.instruction(Instruction::stloc0);
         for statement in code {
             write_statement(statement, &mut data, &mut ins)
         }
 
-        if return_type != "void" {
-            ins.instruction(Instruction::ldnull);
+        if !is_entry_point {
+            ins.instruction(Instruction::ldloc0);
         }
         ins.instruction(Instruction::ret);
 
-        return Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
+        let mut method = Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
+
+        for _ in 0..data.total_locals {
+            method.locals.push("object".to_owned());
+        }
+
+        return method;
     }
 
     let mut blob = InstructionBlob::default();
@@ -46,7 +57,8 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
 
 /// Shared data necessary across the entire proc transpile.
 struct TranspilerData<'a> {
-    pub locals: HashMap<String, u16>,
+    pub total_locals: u16,
+    pub locals: Vec<HashMap<String, u16>>,
     pub uniques: u16,
     pub state: &'a DMState,
     pub class: &'a mut Class,
@@ -80,6 +92,37 @@ impl<'a> TranspilerData<'a> {
         self.uniques += 1;
         val
     }
+
+    /// Adds a local variable with specified name to this scope.
+    pub fn add_local(&mut self, name: &str) -> u16 {
+        // NOTE: Local 0 is . (default return value).
+        let top_pos = self.locals.len()-1;
+        let top = &mut self.locals[top_pos];
+        let new_local_id = self.total_locals;
+        self.total_locals += 1;
+        top.insert(name.to_owned(), new_local_id);
+        new_local_id
+    }
+
+    /// Gets the ID of a local variable.
+    pub fn get_local(&self, name: &str) -> Option<u16> {
+        for locals in self.locals.iter().rev() {
+            if let Some(id) = locals.get(name) {
+                return Some(*id);
+            }
+        }
+
+        None
+    }
+
+    pub fn push_scope(&mut self) {
+        self.locals.push(HashMap::new());
+    }
+
+    pub fn pop_scope(&mut self) {
+        // TODO: Recycle locals.
+        self.locals.pop();
+    }
 }
 
 fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut InstructionBlob) {
@@ -90,7 +133,22 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             // Pop the expression off again. Don't need it.
             ins.instruction(Instruction::pop);
         },
-        _ => {}
+        Statement::Var { name, value, .. } => {
+            let idx = data.add_local(name);
+            if let Some(initializer) = value {
+                evaluate_expression(initializer, false, data, ins);
+                ins.instruction(Instruction::stloc(idx));
+            }
+        },
+        Statement::Setting(name, SettingMode::Assign, exp) => {
+            if let Some(idx) = data.get_local(name) {
+                evaluate_expression(exp, false, data, ins);
+                ins.instruction(Instruction::stloc(idx));
+            }
+        }
+        _ => {
+            ins.not_implemented("Unknown Statement.");
+        }
     }
 }
 
@@ -146,8 +204,10 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
                 ins.instruction(Instruction::ldsfld("object byond_root::world".to_owned()));
             } else if ident == "src" {
                 ins.instruction(Instruction::ldarg0);
+            } else if let Some(idx) = data.get_local(ident) {
+                ins.instruction(Instruction::ldloc(idx));
             } else {
-                ins.not_implemented("Identifier lookup not done yet.");
+                ins.not_implemented("Unknown identifier.");
             }
         },
         Term::String(val) => {
@@ -155,6 +215,9 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
         },
         Term::Expr(expr) => {
             evaluate_expression(expr, false, data, ins);
+        },
+        Term::ReturnValue => {
+            ins.instruction(Instruction::ldloc0);
         }
         _ => {
             ins.not_implemented("Unable to handle term.");
@@ -183,6 +246,12 @@ fn evaluate_follow(follow: &Follow, will_be_discarded: bool, mut term_blob: Inst
     }
 }
 
+// ALRIGHT.
+// So because DM has awful typing support AND I'm too lazy to implement type checking atm,
+// everything is duck typed.
+// So, we need to use C# dynamic. Dynamic does not exist at a CIL level.
+// This monster of a method generates dynamic operations for everything we need.
+// I recommend you to mess around with dynamic on sharplab.io to have the slightest of a grasp what's going on.
 fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, data: &mut TranspilerData, ins: &mut InstructionBlob) {
     // RULE: when this function is done, there is an extra value on the stack IF the operation should've added one.
     // So basically it depends on what kinda operation's being invoked.
@@ -194,6 +263,7 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
         let meta_class = data.get_meta_class();
 
         // call_type is like class [mscorlib]System.Action`3<class [System.Core]System.Runtime.CompilerServices.CallSite, object, object>
+        // I'm gonna be honest, I'm pretty sure arg_count is off by one (hell, 2?).
         let (call_type, arg_count) = match &invoke_type {
             DynamicInvokeType::MemberInvoke { arg_count, expect_return, .. } => {
                 let mut type_args_count = 1;
