@@ -6,23 +6,33 @@ use std::collections::HashMap;
 
 pub struct Class {
     name: String,
+    full_name: String,
+
+    /// This is the INHERITANCE parent.
     parent: String,
     accessibility: ClassAccessibility,
     children: HashMap<String, Class>,
     fields: HashMap<String, Field>,
     methods: HashMap<String, Method>,
+    is_static: bool
 }
 
 impl Class {
-    pub fn new(name: String, accessibility: ClassAccessibility, parent: Option<String>) -> Class {
+    pub fn new(name: String, accessibility: ClassAccessibility, parent: Option<String>, full_name: String, is_static: bool) -> Class {
         Class {
             name,
+            full_name,
             parent: parent.unwrap_or("[mscorlib]System.Object".to_owned()),
             accessibility,
             children: HashMap::new(),
             methods: HashMap::new(),
-            fields: HashMap::new()
+            fields: HashMap::new(),
+            is_static,
         }
+    }
+
+    pub fn get_full_name(&self) -> &str {
+        &self.full_name
     }
 
     pub fn get_accessibility(&self) -> ClassAccessibility {
@@ -44,8 +54,16 @@ impl Class {
         self.methods.insert(method.name.to_owned(), method)
     }
 
+    pub fn has_child_class(&self, name: &str) -> bool {
+        self.children.contains_key(name)
+    }
+
     pub fn get_child_class(&self, name: &str) -> Option<&Class> {
         self.children.get(name)
+    }
+
+    pub fn get_child_class_mut(&mut self, name: &str) -> Option<&mut Class> {
+        self.children.get_mut(name)
     }
 
     pub fn get_field(&self, name: &str) -> Option<&Field> {
@@ -57,7 +75,11 @@ impl Class {
     }
 
     pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writeln!(writer, ".class {} auto ansi beforefieldinit {} extends {} {{", self.accessibility, self.name, self.parent)?;
+        writeln!(writer, ".class {} auto ansi {} beforefieldinit '{}' extends {} {{",
+                 self.accessibility,
+                 if self.is_static { "abstract sealed"} else { "" },
+                 self.name,
+                 self.parent)?;
 
         for field in self.fields.values() {
             field.write(writer)?;

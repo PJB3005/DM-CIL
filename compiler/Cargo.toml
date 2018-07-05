@@ -5,5 +5,5 @@ authors = ["PJB3005 <pieterjan.briers+git@gmail.com>"]
 
 [dependencies]
 dreammaker = { path = "../../SpacemanDMM/src/dreammaker" }
-bitflags = "1.0"
+#bitflags = "1.0"
 structopt = "0.2"

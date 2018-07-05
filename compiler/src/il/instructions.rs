@@ -35,6 +35,10 @@ impl InstructionBlob {
         self.instruction(Instruction::newobj("instance void [mscorlib]System.NotImplementedException::'.ctor' (string)".to_owned()));
         self.instruction(Instruction::throw);
     }
+
+    pub fn absord(&mut self, mut other: InstructionBlob) {
+        self.code.append(&mut other.code);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -48,35 +52,68 @@ enum CodePart {
 #[allow(non_camel_case_types, dead_code)]
 #[derive(Clone, Debug)]
 pub enum Instruction {
+    _box(String),
+    brfalse(String),
+    brtrue(String),
+    br(String),
+    call(String),
+    callvirt(String),
+    dup,
     ldarg(u16),
     ldarg0,
+    ldarg1,
+    ldci4(i32),
+    ldci40,
+    ldci41,
     ldcr4(f32),
+    ldfld(String),
     ldloc(u16),
     ldnull,
     ldsfld(String),
     ldstr(String),
+    ldtoken(String),
+    newarr(String),
     newobj(String),
     nop,
     pop,
+    ret,
+    stelemref,
     stsfld(String),
     throw,
 }
 
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Instruction::*;
         match self {
-            Instruction::ldarg(num) => write!(f, "ldarg {}", num),
-            Instruction::ldarg0 => write!(f, "ldarg.0"),
-            Instruction::ldcr4(num) => write!(f, "ldc.r4 {}", num), 
-            Instruction::ldloc(idx) => write!(f, "ldloc {}", idx),
-            Instruction::ldnull => write!(f, "ldnull"),
-            Instruction::ldsfld(field) => write!(f, "ldsfld {}", field),
-            Instruction::ldstr(literal) => write!(f, "ldstr \"{}\"", literal),
-            Instruction::nop => write!(f, "nop"),
-            Instruction::newobj(constructor) => write!(f, "newobj {}", constructor),
-            Instruction::pop => write!(f, "pop"),
-            Instruction::stsfld(field) => write!(f, "stsfld {}", field),
-            Instruction::throw => write!(f, "throw"),
+            _box(meta) => write!(f, "box {}", meta),
+            brfalse(label) => write!(f, "brfalse {}", label),
+            brtrue(label) => write!(f, "brtrue {}", label),
+            br(label) => write!(f, "br {}", label),
+            call(meta) => write!(f, "call {}", meta),
+            callvirt(meta) => write!(f, "callvirt {}", meta),
+            dup => write!(f, "dup"), 
+            ldarg(num) => write!(f, "ldarg {}", num),
+            ldarg0 => write!(f, "ldarg.0"),
+            ldarg1 => write!(f, "ldarg.1"),
+            ldci40 => write!(f, "ldc.i4.0"),
+            ldci41 => write!(f, "ldc.i4.1"),
+            ldci4(num) => write!(f, "ldc.i4 {}", num),
+            ldcr4(num) => write!(f, "ldc.r4 {}", num),
+            ldfld(field) => write!(f, "ldfld {}", field),
+            ldloc(idx) => write!(f, "ldloc {}", idx),
+            ldnull => write!(f, "ldnull"),
+            ldsfld(field) => write!(f, "ldsfld {}", field),
+            ldstr(literal) => write!(f, "ldstr \"{}\"", literal),
+            ldtoken(meta) => write!(f, "ldtoken {}", meta),
+            nop => write!(f, "nop"),
+            newarr(constructor) => write!(f, "newarr {}", constructor),
+            newobj(constructor) => write!(f, "newobj {}", constructor),
+            pop => write!(f, "pop"),
+            ret => write!(f, "ret"),
+            stelemref => write!(f, "stelem.ref"),
+            stsfld(field) => write!(f, "stsfld {}", field),
+            throw => write!(f, "throw"),
         }
     }
 }

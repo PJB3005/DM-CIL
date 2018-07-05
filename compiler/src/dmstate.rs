@@ -43,4 +43,8 @@ impl DMState {
     pub fn get_annotations(&self, loc: Location) -> Iter {
         self.annotations.get_location(loc)
     }
+
+    pub fn get_all_annotations(&self) -> Iter {
+        self.annotations.iter()
+    }
 }

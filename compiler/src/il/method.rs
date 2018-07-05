@@ -12,6 +12,8 @@ pub struct Method {
     pub is_static: bool,
     pub is_rt_special_name: bool,
     pub is_special_name: bool,
+    pub params: Vec<MethodParameter>,
+    pub locals: Vec<String>,
 }
 
 impl Method {
@@ -30,24 +32,46 @@ impl Method {
             is_static,
             is_rt_special_name: false,
             is_special_name: false,
+            params: vec![],
+            locals: vec![],
         }
     }
 
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-
     pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writeln!(writer, ".method hidebysig {} {} {} default {} '{}' () cil managed\n{{",
+        writeln!(writer, ".method hidebysig {} {} {} {} {} default {} '{}' (",
+               if self.is_rt_special_name { "rtspecialname" } else { "" },
+               if self.is_special_name { "specialname" } else { "" },
                self.accessibility,
                self.virtuality,
                if self.is_static { "static" } else { "instance" },
                self.return_type,
                self.name)?;
-            
+        
+        for (i, param) in self.params.iter().enumerate() {
+            if i != 0 {
+                write!(writer, ", ")?;
+            }
+            write!(writer, "{} {}", param.type_name, param.name)?;
+        }
+
+        writeln!(writer, ") cil managed\n{{")?;
+
         if self.name == "EntryPoint" {
             // TODO: Make this less hacky.
             writeln!(writer, ".entrypoint")?;
+        }
+
+        // FIXME: This really shouldn't be hardcoded.
+        writeln!(writer, ".maxstack 32")?;
+
+        if self.locals.len() != 0 {
+            write!(writer, ".locals init (")?;
+            for (i, local) in self.locals.iter().enumerate() {
+                if i != 0 {
+                    write!(writer, ", ")?;
+                }
+                write!(writer, "[{}] {}", i, local)?;
+            }
         }
 
         self.code.write(writer)?;
@@ -56,6 +80,13 @@ impl Method {
 
         Ok(())
     }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct MethodParameter {
+    pub name: String,
+    pub type_name: String,
+    pub custom_attributes: Vec<String>,
 }
 
 /// Method attributes corresponding to accessibility.

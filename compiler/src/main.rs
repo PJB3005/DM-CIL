@@ -1,23 +1,21 @@
 extern crate dreammaker;
-#[macro_use]
-extern crate bitflags;
+//#[macro_use]
+//extern crate bitflags;
 #[macro_use]
 extern crate structopt;
 
 use dreammaker as dm;
-use dm::annotation::Annotation;
-use dm::objtree::{TypeRef, TypeProc};
-use dm::ast::{Statement};
+use dm::objtree::TypeRef;
 use std::fs::File;
-use std::io::prelude::*;
 use std::path::PathBuf;
 
+mod dm_std;
 mod il;
 mod dmstate;
 mod proc_transpiler;
 
 use dmstate::DMState;
-use il::{Assembly, Class, ClassAccessibility, Field, FieldAccessibility, InstructionBlob, Method, Instruction, MethodAccessibility, MethodVirtuality};
+use il::{Assembly, Class, ClassAccessibility, Field, InstructionBlob, Method, Instruction, MethodAccessibility, MethodVirtuality, FieldAccessibility};
 
 use structopt::StructOpt;
 
@@ -27,17 +25,34 @@ fn main() -> std::io::Result<()> {
 
     let state = DMState::load(&path)?;
 
+    if opt.print_annotations {
+        for annotation in state.get_all_annotations() {
+            println!("{:?}", annotation);
+        }
+    }
+
     let mut asm = Assembly::new(path.file_stem().and_then(|s| s.to_str()).unwrap().to_owned());
 
     {
         let externs = asm.get_externs_mut();
-        externs.push("mscorlib".to_owned());
-        externs.push("System.Core".to_owned());
+        externs.push("mscorlib {
+.publickeytoken = (B7 7A 5C 56 19 34 E0 89 )
+.ver 4:0:0:0
+}".to_owned());
+        externs.push("System.Core
+{
+  .publickeytoken = (B7 7A 5C 56 19 34 E0 89 )
+  .ver 4:0:0:0
+}".to_owned());
         // We use C#'s dynamic system.
         // Even though we're not C#.
         // What're you gonna do about it?
-        externs.push("Microsoft.CSharp".to_owned());
-        externs.push("DM".to_owned());
+        externs.push("Microsoft.CSharp
+{
+  .publickeytoken = (B0 3F 5F 7F 11 D5 0A 3A )
+  .ver 4:0:0:0
+}".to_owned());
+        //externs.push("DM {}".to_owned());
     }
 
     create_everything(&mut asm, &state);
@@ -81,19 +96,22 @@ struct Opt {
     input: String,
 
     #[structopt(short = "o", long = "output")]
-    output: Option<String>
+    output: Option<String>,
+
+    #[structopt(long = "annotations")]
+    print_annotations: bool,
 }
 
 fn create_everything(asm: &mut Assembly, state: &DMState) {
     let mut stack = vec![];
     let tree = state.get_tree();
-    let mut class_root = Class::new("byond_root".to_owned(), ClassAccessibility::Public, None);
+    let mut class_root = Class::new("byond_root".to_owned(), ClassAccessibility::Public, None, "byond_root".to_owned(), false);
     stack.push("byond_root".to_owned());
 
     let root = tree.root();
     create_vars(root, &mut class_root);
 
-    create_global_cctor();
+    class_root.insert_method(dm_std::create_global_cctor());
 
     for (name, typeproc) in &root.procs {
         let method = proc_transpiler::create_proc(typeproc, &mut class_root, &name, true, state);
@@ -105,6 +123,8 @@ fn create_everything(asm: &mut Assembly, state: &DMState) {
         create_node(asm, &mut class_root, state, child, &mut stack);
     }
 
+    dm_std::create_world_class(&mut class_root);
+
     asm.get_classes_mut().push(class_root);
 }
 
@@ -112,13 +132,18 @@ fn create_node(asm: &mut Assembly, parent: &mut Class, state: &DMState, noderef:
     // NOTE: parent is for the HIERARCHY, NOT inheritance.
 
     let node = noderef.get();
+    // TODO: Handle DM parent_type.
     let parent_type_name = type_stack.join("/");
     //println!("name: '{}' stack: {}", node.name, &parent_type_name);
-    let mut class = Class::new(node.name.clone(), ClassAccessibility::NestedPublic, Some(parent_type_name.clone()));
+    let mut class = Class::new(node.name.clone(),
+                               ClassAccessibility::NestedPublic,
+                               Some(parent_type_name.clone()),
+                               format!("{}/{}", parent_type_name, node.name),
+                               false);
 
     create_vars(noderef, &mut class);
 
-    for (name, typeproc) in &node.procs {
+    for (name, _) in &node.procs {
         //println!("{}/{}: {}", parent_type_name, node.name, name);
 
         let mut instructions = InstructionBlob::default();
@@ -147,20 +172,9 @@ fn create_vars(node: TypeRef, class: &mut Class) {
         if let Some(decl) = &typevar.declaration {
             field.is_static = decl.var_type.is_static;
         }
+        field.accessibility = FieldAccessibility::Public;
         class.insert_field(field);
     }
-}
-
-
-fn create_global_cctor() -> Method {
-    let mut code = InstructionBlob::default();
-    code.instruction(Instruction::newobj("".to_owned()));
-    code.instruction(Instruction::stsfld("object byond_root::world".to_owned()));
-    let mut cctor = Method::new(".cctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, true);
-    cctor.is_rt_special_name = true;
-    cctor.is_special_name = true;
-
-    cctor
 }
 
 
