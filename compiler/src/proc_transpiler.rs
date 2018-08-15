@@ -8,14 +8,14 @@ use super::il::*;
 use super::dmstate::DMState;
 
 pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str, is_static: bool, state: &DMState) -> Method {
-    println!("{}: {:?}", proc_name, procdef);
-    
     let is_entry_point = proc_name == "EntryPoint";
     let return_type = if is_entry_point {
         "void".to_owned()
     } else {
         "object".to_owned()
     };
+
+    //println!("{}: {:?}", proc_name, procdef);
 
     if let Some(code) = get_proc_body_details(procdef, state) {
         let mut data = TranspilerData {
@@ -26,6 +26,7 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
             class,
             proc_name,
             is_static,
+            loop_labels: vec![],
         };
         let mut ins = InstructionBlob::default();
         // Load null into . (default return value.)
@@ -64,6 +65,7 @@ struct TranspilerData<'a> {
     pub class: &'a mut Class,
     pub proc_name: &'a str,
     pub is_static: bool,
+    pub loop_labels: Vec<(String, String)>,
 }
 
 impl<'a> TranspilerData<'a> {
@@ -115,6 +117,11 @@ impl<'a> TranspilerData<'a> {
         None
     }
 
+    pub fn push_loop_scope(&mut self, repeat_label: String, exit_label: String) {
+        self.push_scope();
+        self.loop_labels.push((repeat_label, exit_label));
+    }
+
     pub fn push_scope(&mut self) {
         self.locals.push(HashMap::new());
     }
@@ -122,6 +129,27 @@ impl<'a> TranspilerData<'a> {
     pub fn pop_scope(&mut self) {
         // TODO: Recycle locals.
         self.locals.pop();
+    }
+
+    pub fn pop_loop_scope(&mut self) {
+        self.pop_scope();
+        self.loop_labels.pop();
+    }
+
+    pub fn get_loop_exit_label(&self) -> Option<&str> {
+        if self.loop_labels.len() == 0 {
+            return None;
+        }
+
+        Some(&self.loop_labels[self.loop_labels.len()-1].1)
+    }
+
+    pub fn get_loop_repeat_label(&self) -> Option<&str> {
+        if self.loop_labels.len() == 0 {
+            return None;
+        }
+
+        Some(&self.loop_labels[self.loop_labels.len()-1].0)
     }
 }
 
@@ -131,7 +159,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
         Statement::Expr(exp) => {
             evaluate_expression(exp, true, data, ins);
         },
-        Statement::Var { name, value, .. } => {
+        Statement::Var(VarStatement { name, value, .. }) => {
             let idx = data.add_local(name);
             if let Some(initializer) = value {
                 evaluate_expression(initializer, false, data, ins);
@@ -139,14 +167,15 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             }
         },
         Statement::While(exp, statements) => {
-            data.push_scope();
             let uniq = data.get_uniq();
             let test_label = format!("w_{}", uniq);
             let exit_label = format!("e_{}", uniq);
+            data.push_loop_scope(test_label.clone(), exit_label.clone());
 
             ins.label(test_label.clone());
             evaluate_expression(exp, false, data, ins);
-            ins.instruction(Instruction::unbox("[mscorlib]System.Single".to_owned()));
+            
+            ins.instruction(Instruction::call("bool class [DM]DM.DmInternal::Truthy(object)".to_owned()));
             ins.instruction(Instruction::brfalse(exit_label.clone()));
 
             for statement in statements {
@@ -158,8 +187,50 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             ins.label(exit_label);
             ins.instruction(Instruction::nop);
 
-            data.pop_scope();
-        }
+            data.pop_loop_scope();
+        },
+        Statement::DoWhile(statements, exp) => {
+            let uniq = data.get_uniq();
+            let test_label = format!("dw_{}", uniq);
+            let exit_label = format!("de_{}", uniq);
+            let repeat_label = format!("dr_{}", uniq);
+            data.push_loop_scope(test_label.clone(), exit_label.clone());
+
+            ins.label(repeat_label.clone());
+
+            for statement in statements {
+                write_statement(statement, data, ins);
+            }
+
+            ins.label(test_label);
+            ins.instruction(Instruction::nop);
+            evaluate_expression(exp, false, data, ins);
+            ins.instruction(Instruction::call("bool class [DM]DM.DmInternal::Truthy(object)".to_owned()));
+            ins.instruction(Instruction::brtrue(repeat_label));
+            ins.label(exit_label);
+            ins.instruction(Instruction::nop);
+        },
+        Statement::Break(Some(_)) | Statement::Continue(Some(_)) => {
+            ins.not_implemented("Labelled loop flow control is not implemented yet.");
+        },
+        Statement::Break(None) => {
+            if let Some(label) = data.get_loop_exit_label() {
+                ins.instruction(Instruction::br(label.to_owned()));
+            }
+            else
+            {
+                ins.not_implemented("Not in a loop!");
+            }
+        },
+        Statement::Continue(None) => {
+            if let Some(label) = data.get_loop_repeat_label() {
+                ins.instruction(Instruction::br(label.to_owned()));
+            }
+            else
+            {
+                ins.not_implemented("Not in a loop!");
+            }
+        },
         _ => {
             ins.not_implemented("Unknown Statement.");
         }
@@ -185,13 +256,31 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             ins.absord(term_blob);
         },
         Expression::BinaryOp { op, lhs, rhs } => {
-            let mut arg_blob = InstructionBlob::default();
-            evaluate_expression(lhs, false, data, &mut arg_blob);
-            evaluate_expression(rhs, false, data, &mut arg_blob);
-            do_dynamic_invoke(DynamicInvokeType::BinaryOp(*op), arg_blob, data, ins);
-            if will_be_discarded {
-                ins.instruction(Instruction::pop);
-            }
+            match op {
+                BinaryOp::Add | BinaryOp::Mul | BinaryOp::Sub | BinaryOp::Div => {
+                    let mut arg_blob = InstructionBlob::default();
+                    evaluate_expression(lhs, false, data, &mut arg_blob);
+                    evaluate_expression(rhs, false, data, &mut arg_blob);
+                    do_dynamic_invoke(DynamicInvokeType::BinaryOp(*op), arg_blob, data, ins);
+                    if will_be_discarded {
+                        ins.instruction(Instruction::pop);
+                    }
+                },
+                BinaryOp::LShift => {
+                    let mut arg_blob = InstructionBlob::default();
+                    evaluate_expression(lhs, false, data, &mut arg_blob);
+                    evaluate_expression(rhs, false, data, &mut arg_blob);
+                    let invoke = DynamicInvokeType::MemberInvoke {
+                        arg_count: 1,
+                        expect_return: false,
+                        method_name: "output".to_owned()
+                    };
+                    do_dynamic_invoke(invoke, arg_blob, data, ins);
+                },
+                _ => {
+                    ins.not_implemented("Unknown op");
+                },
+            };
         },
         Expression::AssignOp { op: AssignOp::Assign, lhs, rhs } => {
             if let Expression::Base { term: Term::Ident(varname), .. } = *lhs.clone() {
@@ -437,13 +526,13 @@ enum DynamicInvokeType {
 }
 
 fn get_proc_body_details<'a>(procdef: &TypeProc, state: &'a DMState) -> Option<&'a[Statement]> {
-    for anno in state.get_annotations(procdef.value.location) {
-        if let (range, Annotation::ProcHeader(_)) = anno {
+    for anno in state.get_annotations(procdef.value[0].location) {
+        if let (range, Annotation::ProcHeader(..)) = anno {
             let mut end = range.end;
             end.column += 1;
             for anno in state.get_annotations(end) {
                 if let (_, Annotation::ProcBodyDetails(code)) = anno {
-                    println!("{:?}", anno);
+                    //println!("{:?}", anno);
                     return Some(code);
                 }
             }

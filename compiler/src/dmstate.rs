@@ -22,11 +22,9 @@ impl DMState {
             let indents = IndentProcessor::new::<Preprocessor>(&context, preprocess);
             let mut parser = Parser::new(&context, indents);
             parser.annotate_to(&mut at);
-            parser.run();
+            let tree = parser.parse_object_tree();
 
             let sloppy = context.errors().iter().any(|p| p.severity() == Severity::Error);
-            let mut tree = parser.take_tree();
-            tree.finalize(&context, sloppy);
             tree
         };
 

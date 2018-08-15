@@ -7,3 +7,4 @@ authors = ["PJB3005 <pieterjan.briers+git@gmail.com>"]
 dreammaker = { path = "../../SpacemanDMM/src/dreammaker" }
 #bitflags = "1.0"
 structopt = "0.2"
+tempfile = "3.0.3"

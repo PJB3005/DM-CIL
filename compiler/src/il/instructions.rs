@@ -58,6 +58,7 @@ pub enum Instruction {
     br(String),
     call(String),
     callvirt(String),
+    ceq,
     dup,
     ldarg(u16),
     ldarg0,
@@ -84,6 +85,7 @@ pub enum Instruction {
     stsfld(String),
     throw,
     unbox(String),
+    unboxany(String),
 }
 
 impl fmt::Display for Instruction {
@@ -96,6 +98,7 @@ impl fmt::Display for Instruction {
             br(label) => write!(f, "br {}", label),
             call(meta) => write!(f, "call {}", meta),
             callvirt(meta) => write!(f, "callvirt {}", meta),
+            ceq => write!(f, "ceq"),
             dup => write!(f, "dup"), 
             ldarg(num) => write!(f, "ldarg {}", num),
             ldarg0 => write!(f, "ldarg.0"),
@@ -122,6 +125,7 @@ impl fmt::Display for Instruction {
             stsfld(field) => write!(f, "stsfld {}", field),
             throw => write!(f, "throw"),
             unbox(meta) => write!(f, "unbox {}", meta),
+            unboxany(meta) => write!(f, "unbox.any {}", meta),
         }
     }
 }

@@ -1,2 +1,9 @@
 /target
 **/*.rs.bk
+
+# Files I have lying around for testing purposes.
+# Ignore!
+*.dm
+*.il
+*.dll
+*.exe

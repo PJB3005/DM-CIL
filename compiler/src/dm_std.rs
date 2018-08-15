@@ -5,7 +5,7 @@ pub fn create_world_class(parent: &mut Class) {
     
     let mut ctor_code: InstructionBlob = InstructionBlob::default();
     ctor_code.instruction(Instruction::ldarg0);
-    ctor_code.instruction(Instruction::call("instance void [mscorlib]System.Object::.ctor()".to_owned()));
+    ctor_code.instruction(Instruction::call("instance void byond_root::.ctor()".to_owned()));
     ctor_code.instruction(Instruction::ret);
 
     let mut ctor = Method::new(".ctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, ctor_code, false);
@@ -35,4 +35,17 @@ pub fn create_global_cctor() -> Method {
     cctor.is_special_name = true;
 
     cctor
+}
+
+pub fn create_stock_ctor(parent_name: &str) -> Method {
+    let mut code = InstructionBlob::default();
+    code.instruction(Instruction::ldarg0);
+    code.instruction(Instruction::call(format!("instance void {}::.ctor()", parent_name)));
+    code.instruction(Instruction::ret);
+
+    let mut ctor = Method::new(".ctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, false);
+    ctor.is_rt_special_name = true;
+    ctor.is_special_name = true;
+
+    ctor
 }
