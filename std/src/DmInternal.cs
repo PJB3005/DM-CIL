@@ -19,6 +19,11 @@ namespace DM
                 return i != 0f;
             }
 
+            if (x is string s)
+            {
+                return !string.IsNullOrEmpty(s);
+            }
+
             return x != null;
         }
 

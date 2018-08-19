@@ -14,6 +14,7 @@ pub struct Method {
     pub is_special_name: bool,
     pub params: Vec<MethodParameter>,
     pub locals: Vec<String>,
+    pub maxstack: u16,
 }
 
 impl Method {
@@ -34,6 +35,7 @@ impl Method {
             is_special_name: false,
             params: vec![],
             locals: vec![],
+            maxstack: 32,
         }
     }
 
@@ -61,8 +63,8 @@ impl Method {
             writeln!(writer, ".entrypoint")?;
         }
 
-        // FIXME: This really shouldn't be hardcoded.
-        writeln!(writer, ".maxstack 32")?;
+        
+        writeln!(writer, format!(".maxstack {}", self.maxstack))?;
 
         if self.locals.len() != 0 {
             write!(writer, ".locals init (")?;
@@ -72,7 +74,7 @@ impl Method {
                 }
                 write!(writer, "[{}] {}", i, local)?;
             }
-            write!(writer, ")")?;
+            writeln!(writer, ")")?;
         }
 
         self.code.write(writer)?;
@@ -88,6 +90,16 @@ pub struct MethodParameter {
     pub name: String,
     pub type_name: String,
     pub custom_attributes: Vec<String>,
+}
+
+impl MethodParameter {
+    pub fn new(name: &str, type_name: &str) -> MethodParameter {
+        MethodParameter {
+            name: name.to_owned(),
+            type_name: type_name.to_owned(),
+            custom_attributes: vec![],  
+        }
+    }
 }
 
 /// Method attributes corresponding to accessibility.

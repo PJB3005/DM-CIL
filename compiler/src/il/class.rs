@@ -5,18 +5,20 @@ use std::io;
 use std::collections::HashMap;
 
 pub struct Class {
-    name: String,
-    full_name: String,
+    pub name: String,
+    pub full_name: String,
 
     /// This is the INHERITANCE parent.
-    parent: String,
-    accessibility: ClassAccessibility,
-    children: HashMap<String, Class>,
-    fields: HashMap<String, Field>,
-    methods: HashMap<String, Method>,
-    is_static: bool
+    pub parent: String,
+    pub accessibility: ClassAccessibility,
+    pub children: HashMap<String, Class>,
+    pub fields: HashMap<String, Field>,
+    pub methods: HashMap<String, Method>,
+    pub is_static: bool,
+    pub beforefieldinit: bool,
 }
 
+#[allow(dead_code)]
 impl Class {
     pub fn new(name: String, accessibility: ClassAccessibility, parent: Option<String>, full_name: String, is_static: bool) -> Class {
         Class {
@@ -28,6 +30,7 @@ impl Class {
             methods: HashMap::new(),
             fields: HashMap::new(),
             is_static,
+            beforefieldinit: true,
         }
     }
 
@@ -74,10 +77,15 @@ impl Class {
         self.methods.get(name)
     }
 
+    pub fn set_before_field_init(&mut self, before_field_init: bool) {
+        self.beforefieldinit = before_field_init;
+    }
+
     pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writeln!(writer, ".class {} auto ansi {} beforefieldinit '{}' extends {} {{",
+        writeln!(writer, ".class {} auto ansi {} {} '{}' extends {} {{",
                  self.accessibility,
                  if self.is_static { "abstract sealed"} else { "" },
+                 if self.beforefieldinit { "beforefieldinit"} else { "" },
                  self.name,
                  self.parent)?;
 

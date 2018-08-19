@@ -7,6 +7,7 @@ pub struct Assembly {
     classes: Vec<Class>,
 }
 
+#[allow(dead_code)]
 impl Assembly {
     pub fn new(name: String) -> Self {
         Assembly {

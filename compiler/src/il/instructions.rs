@@ -112,7 +112,7 @@ impl fmt::Display for Instruction {
             ldloc(idx) => write!(f, "ldloc {}", idx),
             ldnull => write!(f, "ldnull"),
             ldsfld(field) => write!(f, "ldsfld {}", field),
-            ldstr(literal) => write!(f, "ldstr \"{}\"", literal),
+            ldstr(literal) => write!(f, "ldstr \"{}\"", escape_string(literal)),
             ldtoken(meta) => write!(f, "ldtoken {}", meta),
             nop => write!(f, "nop"),
             newarr(constructor) => write!(f, "newarr {}", constructor),
@@ -130,4 +130,9 @@ impl fmt::Display for Instruction {
     }
 }
 
-
+fn escape_string(string: &str) -> String {
+    string.replace(r"\", r"\\")
+          .replace(r#"""#, r#"\""#)
+          .replace("\n", r"\n")
+          .replace("\t", r"\t")
+}

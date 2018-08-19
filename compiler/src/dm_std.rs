@@ -3,14 +3,7 @@ use super::il::*;
 pub fn create_world_class(parent: &mut Class) {
     let mut class = Class::new("world".to_owned(), ClassAccessibility::NestedPublic, Some("byond_root".to_owned()), "byond_root/world".to_owned(), false);
     
-    let mut ctor_code: InstructionBlob = InstructionBlob::default();
-    ctor_code.instruction(Instruction::ldarg0);
-    ctor_code.instruction(Instruction::call("instance void byond_root::.ctor()".to_owned()));
-    ctor_code.instruction(Instruction::ret);
-
-    let mut ctor = Method::new(".ctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, ctor_code, false);
-    ctor.is_rt_special_name = true;
-    ctor.is_special_name = true;
+    let ctor = create_stock_ctor("byond_root");
     class.insert_method(ctor);
 
     let mut output_code: InstructionBlob = InstructionBlob::default();
@@ -33,6 +26,7 @@ pub fn create_global_cctor() -> Method {
     let mut cctor = Method::new(".cctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, true);
     cctor.is_rt_special_name = true;
     cctor.is_special_name = true;
+    cctor.maxstack = 1;
 
     cctor
 }
@@ -46,6 +40,29 @@ pub fn create_stock_ctor(parent_name: &str) -> Method {
     let mut ctor = Method::new(".ctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, false);
     ctor.is_rt_special_name = true;
     ctor.is_special_name = true;
+    ctor.maxstack = 1;
 
     ctor
+}
+
+pub fn create_std_proc(name: &str) -> Method {
+    let mut method = Method::new(name.to_owned(), "object".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, InstructionBlob::default(), true);
+
+    match name {
+        "abs" => {
+            method.code.instruction(Instruction::ldarg0);
+            method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::call("float32 [mscorlib]System.Math::Abs(float32)".to_owned()));
+            method.code.instruction(Instruction::_box("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::ret);
+
+            method.params.push(MethodParameter::new("A", "object"));
+            method.maxstack = 1;
+        },
+        _ => {
+            method.code.not_implemented("std proc not implemented.");
+        }
+    };
+
+    method
 }

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::io;
 use dm::annotation::{AnnotationTree, Iter};
 use dm::objtree::ObjectTree;
-use dm::{Context, Severity, Location};
+use dm::{Context, Location};
 use dm::preprocessor::Preprocessor;
 use dm::indents::IndentProcessor;
 use dm::parser::Parser;
@@ -24,7 +24,7 @@ impl DMState {
             parser.annotate_to(&mut at);
             let tree = parser.parse_object_tree();
 
-            let sloppy = context.errors().iter().any(|p| p.severity() == Severity::Error);
+            //let sloppy = context.errors().iter().any(|p| p.severity() == Severity::Error);
             tree
         };
 

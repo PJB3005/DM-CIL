@@ -6,7 +6,8 @@ extern crate structopt;
 extern crate tempfile;
 
 use dreammaker as dm;
-use dm::objtree::TypeRef;
+use dm::objtree::{TypeRef, ProcDeclaration};
+use dm::{FILEID_BUILTINS, Location};
 use std::fs::File;
 use std::path::PathBuf;
 use std::process::Command;
@@ -141,7 +142,11 @@ fn create_everything(asm: &mut Assembly, state: &DMState) {
     class_root.insert_method(dm_std::create_stock_ctor("[mscorlib]System.Object"));
 
     for (name, typeproc) in &root.procs {
-        let method = proc_transpiler::create_proc(typeproc, &mut class_root, &name, true, state);
+        let method = if let Some(ProcDeclaration { location: Location { file: FILEID_BUILTINS, .. }, .. }) = typeproc.declaration {
+            dm_std::create_std_proc(name)
+        } else {
+            proc_transpiler::create_proc(typeproc, &mut class_root, &name, true, state)
+        };
 
         class_root.insert_method(method);
     }

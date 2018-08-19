@@ -47,13 +47,13 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
             method.locals.push("object".to_owned());
         }
 
-        return method;
+        method
+    } else {
+        let mut blob = InstructionBlob::default();
+        blob.not_implemented(&format!("Unable to find proc body: {}, {:?}", proc_name, procdef));
+
+        Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, blob, is_static)
     }
-
-    let mut blob = InstructionBlob::default();
-    blob.not_implemented("Unable to find proc body.");
-
-    Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, blob, is_static)
 }
 
 /// Shared data necessary across the entire proc transpile.
@@ -117,6 +117,13 @@ impl<'a> TranspilerData<'a> {
         None
     }
 
+    #[allow(dead_code)]
+    pub fn add_unnamed_local(&mut self) -> u16 {
+        let new_local_id = self.total_locals;
+        self.total_locals += 1;
+        new_local_id
+    }
+
     pub fn push_loop_scope(&mut self, repeat_label: String, exit_label: String) {
         self.push_scope();
         self.loop_labels.push((repeat_label, exit_label));
@@ -166,6 +173,51 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
                 ins.instruction(Instruction::stloc(idx));
             }
         },
+        Statement::If(ifs, else_statements) => {
+            let uniq = data.get_uniq();
+            // The label AFTER the else clause.
+            let end_label = format!("ip_{}", uniq);
+            let else_label = format!("ie_{}", uniq);
+
+            let ifcount = ifs.len();
+            for (i, (expr, statements)) in ifs.iter().enumerate() {
+                ins.label(format!("ic_{}_{}", uniq, i));
+                // I should probably write this down *somewhere*.
+                // I put a nop after most labels so that something if like evaluate_expression ALSO writes a label,
+                // because 2 labels on the same opcode would break.
+                ins.instruction(Instruction::nop);
+                evaluate_expression(expr, false, data, ins);
+                evaluate_truthy(ins);
+                // There is another else if.
+                if i != ifcount - 1 {
+                    ins.instruction(Instruction::brfalse(format!("ic_{}_{}", uniq, i+1)));
+                } else {
+                    if else_statements.is_some() {
+                        ins.instruction(Instruction::brfalse(else_label.clone()));
+                    } else {
+                        ins.instruction(Instruction::brfalse(end_label.clone()))
+                    }
+                }
+
+                for statement in statements {
+                    write_statement(statement, data, ins);
+                }
+
+                ins.instruction(Instruction::br(end_label.clone()));
+            }
+
+            if let Some(statements) = else_statements {
+                ins.label(else_label);
+                ins.instruction(Instruction::nop);
+                
+                for statement in statements {
+                    write_statement(statement, data, ins);
+                }
+            }
+
+            ins.label(end_label);
+            ins.instruction(Instruction::nop);
+        },
         Statement::While(exp, statements) => {
             let uniq = data.get_uniq();
             let test_label = format!("w_{}", uniq);
@@ -174,8 +226,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
 
             ins.label(test_label.clone());
             evaluate_expression(exp, false, data, ins);
-            
-            ins.instruction(Instruction::call("bool class [DM]DM.DmInternal::Truthy(object)".to_owned()));
+            evaluate_truthy(ins);
             ins.instruction(Instruction::brfalse(exit_label.clone()));
 
             for statement in statements {
@@ -249,22 +300,80 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                 evaluate_follow(follow, will_be_discarded, old_blob, data, &mut term_blob);
             };
 
-            for unary in unary.iter().rev() {
+            for _unary in unary.iter().rev() {
                 // TODO: Unary ops.
             }
 
             ins.absord(term_blob);
+            if will_be_discarded {
+                ins.instruction(Instruction::pop);
+            }
         },
         Expression::BinaryOp { op, lhs, rhs } => {
             match op {
-                BinaryOp::Add | BinaryOp::Mul | BinaryOp::Sub | BinaryOp::Div => {
+                BinaryOp::Add
+                | BinaryOp::Mul
+                | BinaryOp::Sub
+                | BinaryOp::Div
+                | BinaryOp::Eq
+                | BinaryOp::NotEq
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEq 
+                | BinaryOp::Less
+                | BinaryOp::LessEq
+                | BinaryOp::Mod => {
                     let mut arg_blob = InstructionBlob::default();
                     evaluate_expression(lhs, false, data, &mut arg_blob);
                     evaluate_expression(rhs, false, data, &mut arg_blob);
                     do_dynamic_invoke(DynamicInvokeType::BinaryOp(*op), arg_blob, data, ins);
                     if will_be_discarded {
                         ins.instruction(Instruction::pop);
+                    } else {
+                        match op {
+                            BinaryOp::Eq
+                            | BinaryOp::NotEq
+                            | BinaryOp::Greater
+                            | BinaryOp::GreaterEq 
+                            | BinaryOp::Less
+                            | BinaryOp::LessEq => {
+                                ins.instruction(Instruction::unboxany("[mscorlib]System.Boolean".to_owned()));
+                                bool_to_float(data, ins)
+                            },
+                            _ => {}
+                        };
                     }
+                },
+                BinaryOp::And => {
+                    let uniq = data.get_uniq();
+                    let exit = format!("opand_lhs_false_{}", uniq);
+                    evaluate_expression(lhs, false, data, ins);
+                    ins.instruction(Instruction::dup);
+                    evaluate_truthy(ins);
+                    ins.instruction(Instruction::brfalse(exit.clone()));
+                    ins.instruction(Instruction::pop);
+
+                    evaluate_expression(rhs, false, data, ins);
+                    ins.label(exit);
+                    ins.instruction(Instruction::nop);
+                    if will_be_discarded {
+                        ins.instruction(Instruction::pop);
+                    } 
+                },
+                BinaryOp::Or => {
+                    let uniq = data.get_uniq();
+                    let exit = format!("opor_lhs_true_{}", uniq);
+                    evaluate_expression(lhs, false, data, ins);
+                    ins.instruction(Instruction::dup);
+                    evaluate_truthy(ins);
+                    ins.instruction(Instruction::brtrue(exit.clone()));
+                    ins.instruction(Instruction::pop);
+
+                    evaluate_expression(rhs, false, data, ins);
+                    ins.label(exit);
+                    ins.instruction(Instruction::nop);
+                    if will_be_discarded {
+                        ins.instruction(Instruction::pop);
+                    } 
                 },
                 BinaryOp::LShift => {
                     let mut arg_blob = InstructionBlob::default();
@@ -296,7 +405,7 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             } else {
                 ins.not_implemented("That lvalue is too complex for me.");
             }
-        }
+        },
         _ => {
             ins.not_implemented("Unable to handle expression type.");
         }
@@ -336,9 +445,33 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
         },
         Term::ReturnValue => {
             ins.instruction(Instruction::ldloc0);
-        }
-        _ => {
-            ins.not_implemented("Unable to handle term.");
+        },
+        Term::Call(name, args) => {
+            if !data.is_static {
+                ins.not_implemented("Can't do unscoped calls in non static yet.");
+                return;
+            }
+            let tree = data.state.get_tree();
+            let root = tree.root();
+            if let Some(proc) = root.get_proc(name) {
+                let mut args_tok = String::new();
+                if proc.parameters.len() != 0 {
+                    args_tok.push_str("object");
+                    for _ in 1..proc.parameters.len() {
+                        args_tok.push_str(", object");
+                    }
+                }
+                println!("{:?}", proc);
+                for expr in args {
+                    evaluate_expression(expr, false, data, ins);
+                }
+                ins.instruction(Instruction::call(format!("object byond_root::{}({})", name, args_tok)));
+            } else {
+                panic!(format!("Method does not exist: {}", name));
+            }
+        },
+        t => {
+            ins.not_implemented(&format!("Unable to handle term: {:?}", t));
         }
     }
 }
@@ -358,8 +491,8 @@ fn evaluate_follow(follow: &Follow, will_be_discarded: bool, mut term_blob: Inst
                 method_name: method_name.clone()
                 }, term_blob, data, ins);
         },
-        _ => {
-            ins.not_implemented("Non-call follows not implemented.");
+        a => {
+            ins.not_implemented(&format!("Non-call follows not implemented: {:?}", a));
         }
     }
 }
@@ -436,23 +569,30 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
             // No generics.
             ins.instruction(Instruction::ldnull);
         },
-        DynamicInvokeType::BinaryOp(BinaryOp::Add) => {
-            ins.instruction(Instruction::ldci40);
-        },
-        DynamicInvokeType::BinaryOp(BinaryOp::Sub) => {
-            ins.instruction(Instruction::ldci4(42));
-        },
-        DynamicInvokeType::BinaryOp(BinaryOp::Mul) => {
-            ins.instruction(Instruction::ldci4(26));
-        },
-        DynamicInvokeType::BinaryOp(BinaryOp::Div) => {
-            ins.instruction(Instruction::ldci4(12));
+        DynamicInvokeType::BinaryOp(op) => {
+            ins.instruction(Instruction::ldci4(match op {
+                // These correspond to System.Linq.Expressions.ExpressionType.
+                BinaryOp::Add => 0,
+                BinaryOp::Sub => 42,
+                BinaryOp::Mul => 26,
+                BinaryOp::Div => 12,
+                BinaryOp::Eq => 13,
+                BinaryOp::NotEq => 35,
+                BinaryOp::Greater => 15,
+                BinaryOp::GreaterEq => 16,
+                BinaryOp::Less => 20,
+                BinaryOp::LessEq => 21,
+                BinaryOp::Mod => 25,
+                _ => panic!("Unsupported binary op!"),
+            }));
         },
 
+        /*
         ref a => {
             println!("{:?}", a);
             ins.not_implemented("Unimplemented invoke type");
         }
+        */
     };
 
     // Push System.Type.
@@ -540,4 +680,24 @@ fn get_proc_body_details<'a>(procdef: &TypeProc, state: &'a DMState) -> Option<&
     }
 
     None
+}
+
+fn evaluate_truthy(ins: &mut InstructionBlob) {
+    ins.instruction(Instruction::call("bool class [DM]DM.DmInternal::Truthy(object)".to_owned()));
+}
+
+/// Writes in a conversion from a bool to a float.
+/// Because float is the numeric type in BYOND, but stuff such as equality returns bool.
+fn bool_to_float(data: &mut TranspilerData, ins: &mut InstructionBlob) {
+    let uniq = data.get_uniq();
+    let true_label = format!("btf_{}_t", uniq);
+    let escape_label = format!("btf_{}_e", uniq);
+    // Effectively compiles "x ? 1f : 0f"
+    ins.instruction(Instruction::brtrue(true_label.clone()));
+    ins.instruction(Instruction::ldcr4(0f32));
+    ins.instruction(Instruction::br(escape_label.clone()));
+    ins.label(true_label);
+    ins.instruction(Instruction::ldcr4(1f32));
+    ins.label(escape_label);
+    ins.instruction(Instruction::_box("[mscorlib]System.Single".to_owned()));
 }
