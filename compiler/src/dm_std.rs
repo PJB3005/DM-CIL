@@ -59,6 +59,32 @@ pub fn create_std_proc(name: &str) -> Method {
             method.params.push(MethodParameter::new("A", "object"));
             method.maxstack = 1;
         },
+        "min" => {
+            method.code.instruction(Instruction::ldarg0);
+            method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::ldarg1);
+            method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::call("float32 [mscorlib]System.Math::Min(float32, float32)".to_owned()));
+            method.code.instruction(Instruction::_box("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::ret);
+
+            method.params.push(MethodParameter::new("A", "object"));
+            method.params.push(MethodParameter::new("B", "object"));
+            method.maxstack = 2;
+        },
+        "max" => {
+            method.code.instruction(Instruction::ldarg0);
+            method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::ldarg1);
+            method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::call("float32 [mscorlib]System.Math::Max(float32, float32)".to_owned()));
+            method.code.instruction(Instruction::_box("[mscorlib]System.Single".to_owned()));
+            method.code.instruction(Instruction::ret);
+
+            method.params.push(MethodParameter::new("A", "object"));
+            method.params.push(MethodParameter::new("B", "object"));
+            method.maxstack = 2;
+        },
         _ => {
             method.code.not_implemented("std proc not implemented.");
         }
