@@ -28,7 +28,19 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
             is_static,
             loop_labels: vec![],
         };
+
         let mut ins = InstructionBlob::default();
+
+        // Load up arguments into locals.
+        // Not efficient but it makes the code simpler.
+        let proc_value = &procdef.value[0];
+        for (i, param) in proc_value.parameters.iter().enumerate() {
+            let local = data.add_local(&param.name);
+            let arg = if is_static { i } else { i + 1 } as u16;
+            ins.instruction(Instruction::ldarg(arg));
+            ins.instruction(Instruction::stloc(local));
+        }
+        
         // Load null into . (default return value.)
         ins.instruction(Instruction::ldnull);
         ins.instruction(Instruction::stloc0);
@@ -42,6 +54,10 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
         ins.instruction(Instruction::ret);
 
         let mut method = Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
+
+        for param in &proc_value.parameters {
+            method.params.push(MethodParameter::new(&param.name, "object"));
+        }
 
         for _ in 0..data.total_locals {
             method.locals.push("object".to_owned());

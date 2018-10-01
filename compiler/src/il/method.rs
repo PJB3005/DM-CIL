@@ -64,7 +64,7 @@ impl Method {
         }
 
         
-        writeln!(writer, format!(".maxstack {}", self.maxstack))?;
+        writeln!(writer, ".maxstack {}", self.maxstack)?;
 
         if self.locals.len() != 0 {
             write!(writer, ".locals init (")?;
