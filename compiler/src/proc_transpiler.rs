@@ -25,6 +25,7 @@ pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, i
             locals: vec![HashMap::new()],
             uniques: 0,
             state,
+            compiler_state,
             class,
             proc_name,
             is_static,
@@ -79,6 +80,7 @@ struct TranspilerData<'a> {
     pub locals: Vec<HashMap<String, u16>>,
     pub uniques: u16,
     pub state: &'a DMState,
+    pub compiler_state: &'a CompilerState,
     pub class: &'a mut Class,
     pub proc_name: &'a str,
     pub is_static: bool,
@@ -305,16 +307,16 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
     }
 }
 
-fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &mut TranspilerData, ins: &mut InstructionBlob) {
+fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &mut TranspilerData, ins: &mut InstructionBlob) -> VariableType {
     // RULE: when this function is done, ONE extra value on the stack ONLY if will_be_discarded is false.
     match expression {
         Expression::Base { unary, term, follow } => {
             let mut term_blob = InstructionBlob::default();
-            evaluate_term(term, data, &mut term_blob);
+            let mut term_type = evaluate_term(term, data, &mut term_blob);
             for follow in follow.iter().rev() {
                 let old_blob = term_blob;
                 term_blob = InstructionBlob::default();
-                evaluate_follow(follow, will_be_discarded, old_blob, data, &mut term_blob);
+                term_type = evaluate_follow(follow, will_be_discarded, term_type, old_blob, data, &mut term_blob);
             };
 
             for _unary in unary.iter().rev() {
@@ -325,6 +327,7 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             if will_be_discarded {
                 ins.instruction(Instruction::pop);
             }
+            VariableType::Unspecified
         },
         Expression::BinaryOp { op, lhs, rhs } => {
             match op {
@@ -358,7 +361,8 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                             },
                             _ => {}
                         };
-                    }
+                    };
+                    VariableType::Unspecified
                 },
                 BinaryOp::And => {
                     let uniq = data.get_uniq();
@@ -374,7 +378,8 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                     ins.instruction(Instruction::nop);
                     if will_be_discarded {
                         ins.instruction(Instruction::pop);
-                    } 
+                    }
+                    VariableType::Unspecified
                 },
                 BinaryOp::Or => {
                     let uniq = data.get_uniq();
@@ -390,7 +395,8 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                     ins.instruction(Instruction::nop);
                     if will_be_discarded {
                         ins.instruction(Instruction::pop);
-                    } 
+                    }
+                    VariableType::Unspecified
                 },
                 BinaryOp::LShift => {
                     let mut arg_blob = InstructionBlob::default();
@@ -402,11 +408,14 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                         method_name: "output".to_owned()
                     };
                     do_dynamic_invoke(invoke, arg_blob, data, ins);
+                    VariableType::Unspecified
                 },
                 _ => {
                     ins.not_implemented("Unknown op");
+                    VariableType::Unspecified
                 },
             };
+            VariableType::Unspecified
         },
         Expression::AssignOp { op: AssignOp::Assign, lhs, rhs } => {
             if let Expression::Base { term: Term::Ident(varname), .. } = *lhs.clone() {
@@ -422,51 +431,63 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             } else {
                 ins.not_implemented("That lvalue is too complex for me.");
             }
+            VariableType::Unspecified
         },
         _ => {
             ins.not_implemented("Unable to handle expression type.");
+            VariableType::Unspecified
         }
     }
 }
 
-fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBlob) {
+fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBlob) -> VariableType {
     // RULE: when this function is done, there is ONE extra value on the stack.
     match term {
         Term::Int(val) => {
             ins.instruction(Instruction::ldcr4(*val as f32));
             ins.instruction(Instruction::_box("[mscorlib]System.Single".to_owned()));
+            VariableType::Unspecified
         }
         Term::Float(val) => {
             ins.instruction(Instruction::ldcr4(*val));
             ins.instruction(Instruction::_box("[mscorlib]System.Single".to_owned()));
-        },
+            VariableType::Unspecified
+        }
         Term::Null => {
             ins.instruction(Instruction::ldnull);
-        },
+            VariableType::Unspecified
+        }
         Term::Ident(ident) => {
             if ident == "world" {
                 ins.instruction(Instruction::ldsfld("object byond_root::world".to_owned()));
+                ins.instruction(Instruction::castclass("byond_root/world".into()));
+                VariableType::Object("/world".into())
             } else if ident == "src" {
                 ins.instruction(Instruction::ldarg0);
+                VariableType::Unspecified
             } else if let Some(idx) = data.get_local(ident) {
                 ins.instruction(Instruction::ldloc(idx));
+                VariableType::Unspecified
             } else {
                 ins.not_implemented("Unknown identifier.");
+                VariableType::Unspecified
             }
         },
         Term::String(val) => {
             ins.instruction(Instruction::ldstr(val.to_owned()));
+            VariableType::Unspecified
         },
         Term::Expr(expr) => {
-            evaluate_expression(expr, false, data, ins);
+            evaluate_expression(expr, false, data, ins)
         },
         Term::ReturnValue => {
             ins.instruction(Instruction::ldloc0);
+            VariableType::Unspecified
         },
         Term::Call(name, args) => {
             if !data.is_static {
                 ins.not_implemented("Can't do unscoped calls in non static yet.");
-                return;
+                return VariableType::Unspecified;
             }
             let tree = data.state.get_tree();
             let root = tree.root();
@@ -483,33 +504,68 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
                     evaluate_expression(expr, false, data, ins);
                 }
                 ins.instruction(Instruction::call(format!("object byond_root::{}({})", name, args_tok)));
+                VariableType::Unspecified
             } else {
                 panic!(format!("Method does not exist: {}", name));
             }
         },
         t => {
             ins.not_implemented(&format!("Unable to handle term: {:?}", t));
+            VariableType::Unspecified
         }
     }
 }
 
-fn evaluate_follow(follow: &Follow, will_be_discarded: bool, mut term_blob: InstructionBlob, data: &mut TranspilerData, ins: &mut InstructionBlob) {
-    // RULE: term_callback will insert ONE element into the stack, which is the object to call on.
+fn evaluate_follow(follow: &Follow, will_be_discarded: bool, term_type: VariableType, mut term_blob: InstructionBlob, data: &mut TranspilerData, ins: &mut InstructionBlob) -> VariableType {
     // When this function is done, there is an extra value on the stack IF !will_be_discarded 
     match follow {
         Follow::Call(_, method_name, args) => {
             for arg in args {
-                evaluate_expression(arg, false, data, &mut term_blob)
+                evaluate_expression(arg, false, data, &mut term_blob);
             }
 
-            do_dynamic_invoke(DynamicInvokeType::MemberInvoke {
-                arg_count: args.len() as u16,
-                expect_return: !will_be_discarded,
-                method_name: method_name.clone()
-                }, term_blob, data, ins);
+            match term_type {
+                VariableType::Unspecified => {
+                    do_dynamic_invoke(DynamicInvokeType::MemberInvoke {
+                        arg_count: args.len() as u16,
+                        expect_return: !will_be_discarded,
+                        method_name: method_name.clone()
+                    }, term_blob, data, ins);
+                    VariableType::Unspecified
+                },
+                VariableType::Object(path) => {
+                    if !data.compiler_state.types.contains_key(&path) {
+                        ins.not_implemented("Unable to find type.".into());
+                        return VariableType::Unspecified;
+                    }
+                    let type_instance = &data.compiler_state.types[&path];
+                    if !type_instance.procs.contains_key(method_name) {
+                        ins.not_implemented("Unable to find proc.".into())
+                    }
+                    
+                    //let instance_proc = &type_instance.procs[method_name];
+                    // oh shit we got it.
+                    ins.absord(term_blob);
+                    let arg_count = args.len();
+                    let mut args = String::new();
+                    if arg_count > 0 {
+                        args.push_str("object");
+
+                        if arg_count > 1 {
+                            for _ in 1..arg_count {
+                                args.push_str(", object");
+                            }
+                        }
+                    }
+                    ins.instruction(Instruction::call(format!("instance object byond_root{}::{}({})", path, method_name, args)));
+
+                    VariableType::Unspecified
+                }
+            }
         },
         a => {
             ins.not_implemented(&format!("Non-call follows not implemented: {:?}", a));
+            VariableType::Unspecified
         }
     }
 }

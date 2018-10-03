@@ -1,3 +1,4 @@
+use std::fmt;
 use std::collections::HashMap;
 use dreammaker::Location;
 
@@ -31,6 +32,15 @@ impl ByondPath {
         &self.segments[self.segments.len()-1]
     }
 }
+
+impl fmt::Display for ByondPath {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.rooted {
+            write!(f, "/")?;
+        }
+        write!(f, "{}", self.segments.join("/"))
+    }
+} 
 
 impl<'a> From<&'a str> for ByondPath {
     fn from(val: &'a str) -> ByondPath {
