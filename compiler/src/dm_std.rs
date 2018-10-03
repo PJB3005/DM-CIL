@@ -1,4 +1,5 @@
 use super::il::*;
+use super::compiler_state::*;
 
 pub fn create_world_class(parent: &mut Class) {
     let mut class = Class::new("world".to_owned(), ClassAccessibility::NestedPublic, Some("byond_root".to_owned()), "byond_root/world".to_owned(), false);
@@ -45,11 +46,10 @@ pub fn create_stock_ctor(parent_name: &str) -> Method {
     ctor
 }
 
-pub fn create_std_proc(name: &str) -> Method {
-    let mut method = Method::new(name.to_owned(), "object".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, InstructionBlob::default(), true);
-
-    match name {
-        "abs" => {
+pub fn create_std_proc(std_proc: &StdProc) -> Method {
+    match std_proc {
+        StdProc::Abs => {
+            let mut method = Method::new("abs".into(), "object".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, InstructionBlob::default(), true);
             method.code.instruction(Instruction::ldarg0);
             method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
             method.code.instruction(Instruction::call("float32 [mscorlib]System.Math::Abs(float32)".to_owned()));
@@ -58,7 +58,11 @@ pub fn create_std_proc(name: &str) -> Method {
 
             method.params.push(MethodParameter::new("A", "object"));
             method.maxstack = 1;
+            method
         },
+        StdProc::WorldOutput => {
+            panic!()
+        }, /*
         "min" => {
             method.code.instruction(Instruction::ldarg0);
             method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
@@ -84,11 +88,47 @@ pub fn create_std_proc(name: &str) -> Method {
             method.params.push(MethodParameter::new("A", "object"));
             method.params.push(MethodParameter::new("B", "object"));
             method.maxstack = 2;
-        },
-        _ => {
+        },*/
+        StdProc::Unimplemented(name) => {
+            let mut method = Method::new(name.clone(), "object".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, InstructionBlob::default(), true);
             method.code.not_implemented("std proc not implemented.");
+            method
         }
-    };
+    }
+}
 
-    method
+pub fn create_std(state: &mut CompilerState) {
+    // Create global procs.
+    {
+        let mut proc_abs = Proc::new("abs", ProcSource::Std(StdProc::Abs));
+        proc_abs.parameters.push(ProcParameter::new("A", VariableType::Unspecified));
+        state.global_procs.insert(proc_abs.name.clone(), proc_abs);
+    }
+
+    {
+        let mut proc_min = Proc::new("min", ProcSource::Std(StdProc::Abs));
+        proc_min.var_arg = true;
+        state.global_procs.insert(proc_min.name.clone(), proc_min);
+    }
+
+    {
+        let mut proc_max = Proc::new("max", ProcSource::Std(StdProc::Abs));
+        proc_max.var_arg = true;
+        state.global_procs.insert(proc_max.name.clone(), proc_max);
+    }
+
+    // Create world.
+    {
+        let world_path = "/world".into();
+        let mut world_type = CompilerType::new(&world_path);
+        
+        let mut output_proc = Proc::new("output", ProcSource::Std(StdProc::WorldOutput));
+        output_proc.parameters.push(ProcParameter::new("O", VariableType::Unspecified));
+        world_type.procs.insert("output".into(), output_proc);
+
+        state.types.insert(world_path.clone(), world_type);
+
+        let world_var = GlobalVar { name: "world".into(), var_type: VariableType::Object(world_path)};
+        state.global_vars.insert("world".into(), world_var);
+    }
 }

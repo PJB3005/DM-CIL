@@ -89,16 +89,22 @@ impl Class {
                  self.name,
                  self.parent)?;
 
-        for field in self.fields.values() {
-            field.write(writer)?;
+        let mut keys = self.fields.keys().collect::<Vec<&String>>();
+        keys.sort_unstable();
+        for key in keys {
+            self.fields[key].write(writer)?;
         }
 
-        for method in self.methods.values() {
-            method.write(writer)?;
+        let mut keys = self.methods.keys().collect::<Vec<&String>>();
+        keys.sort_unstable();
+        for key in keys {
+            self.methods[key].write(writer)?;
         }
 
-        for class in self.children.values() {
-            class.write(writer)?;
+        let mut keys = self.children.keys().collect::<Vec<&String>>();
+        keys.sort_unstable();
+        for key in keys {
+            self.children[key].write(writer)?;
         }
 
         writeln!(writer, "}}")?;

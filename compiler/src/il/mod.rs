@@ -1,4 +1,5 @@
 //! Handles the outputting and handling of CIL.
+//! This is mostly data types for easier outputting.
 
 pub mod assembly;
 pub mod class;

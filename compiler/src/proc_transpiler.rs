@@ -1,13 +1,15 @@
 //! The workhorse of the compiler.
 //! Compiles the a BYOND AST proc into a CIL method.
 use std::collections::HashMap;
+use dm::Location;
 use dm::ast::*;
-use dm::objtree::TypeProc;
 use dm::annotation::Annotation;
 use super::il::*;
 use super::dmstate::DMState;
+use super::compiler_state::*;
 
-pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str, is_static: bool, state: &DMState) -> Method {
+pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, is_static: bool,
+                          state: &DMState, compiler_state: &CompilerState) -> Method {
     let is_entry_point = proc_name == "EntryPoint";
     let return_type = if is_entry_point {
         "void".to_owned()
@@ -17,7 +19,7 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
 
     //println!("{}: {:?}", proc_name, procdef);
 
-    if let Some(code) = get_proc_body_details(procdef, state) {
+    if let Some(code) = get_proc_body_details(the_proc, state) {
         let mut data = TranspilerData {
             total_locals: 1,
             locals: vec![HashMap::new()],
@@ -33,8 +35,7 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
 
         // Load up arguments into locals.
         // Not efficient but it makes the code simpler.
-        let proc_value = &procdef.value[0];
-        for (i, param) in proc_value.parameters.iter().enumerate() {
+        for (i, param) in the_proc.parameters.iter().enumerate() {
             let local = data.add_local(&param.name);
             let arg = if is_static { i } else { i + 1 } as u16;
             ins.instruction(Instruction::ldarg(arg));
@@ -55,7 +56,7 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
 
         let mut method = Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
 
-        for param in &proc_value.parameters {
+        for param in &the_proc.parameters {
             method.params.push(MethodParameter::new(&param.name, "object"));
         }
 
@@ -66,7 +67,7 @@ pub(crate) fn create_proc(procdef: &TypeProc, class: &mut Class, proc_name: &str
         method
     } else {
         let mut blob = InstructionBlob::default();
-        blob.not_implemented(&format!("Unable to find proc body: {}, {:?}", proc_name, procdef));
+        blob.not_implemented(&format!("Unable to find proc body: {}, {:?}", proc_name, the_proc));
 
         Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, blob, is_static)
     }
@@ -681,8 +682,12 @@ enum DynamicInvokeType {
     BinaryOp(BinaryOp),
 }
 
-fn get_proc_body_details<'a>(procdef: &TypeProc, state: &'a DMState) -> Option<&'a[Statement]> {
-    for anno in state.get_annotations(procdef.value[0].location) {
+fn get_proc_body_details<'a>(the_proc: &Proc, state: &'a DMState) -> Option<&'a[Statement]> {
+    let loc = match the_proc.source {
+        ProcSource::Code(loc) => loc,
+        _ => panic!("Don't use proc body details on STD procs!"),
+    };
+    for anno in state.get_annotations(loc) {
         if let (range, Annotation::ProcHeader(..)) = anno {
             let mut end = range.end;
             end.column += 1;
