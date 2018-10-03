@@ -61,8 +61,31 @@ pub fn create_std_proc(std_proc: &StdProc) -> Method {
             method
         },
         StdProc::WorldOutput => {
-            panic!()
-        }, /*
+            let mut method = Method::new("output".into(), "object".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, InstructionBlob::default(), false);
+            method.code.instruction(Instruction::ldarg1);
+            method.code.instruction(Instruction::call("void [mscorlib]System.Console::WriteLine(object)".to_owned()));
+            method.code.instruction(Instruction::ldnull);
+            method.code.instruction(Instruction::ret);
+
+            method.maxstack = 1;
+            method.params.push(MethodParameter {custom_attributes: vec![], name: "obj".to_owned(), type_name: "object".to_owned() });
+
+            method
+        },
+        StdProc::Sin => {
+            let mut method = Method::new("sin".into(), "object".into(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, InstructionBlob::default(), true);
+            method.code.instruction(Instruction::ldarg0);
+            method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".into()));
+            method.code.instruction(Instruction::convr8);
+            method.code.instruction(Instruction::call("float64 [mscorlib]System.Math::Sin(float64)".into()));
+            method.code.instruction(Instruction::convr4);
+            method.code.instruction(Instruction::_box("[mscorlib]System.Single".into()));
+            method.code.instruction(Instruction::ret);
+
+            method.params.push(MethodParameter::new("X", "object"));
+            method.maxstack = 1;
+            method
+        },/*
         "min" => {
             method.code.instruction(Instruction::ldarg0);
             method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".to_owned()));
@@ -117,10 +140,17 @@ pub fn create_std(state: &mut CompilerState) {
         state.global_procs.insert(proc_max.name.clone(), proc_max);
     }
 
+    {
+        let mut proc_sin = Proc::new("sin", ProcSource::Std(StdProc::Sin));
+        proc_sin.parameters.push(ProcParameter::new("X", VariableType::Unspecified));
+        state.global_procs.insert(proc_sin.name.clone(), proc_sin);
+    }
+
     // Create world.
     {
         let world_path = "/world".into();
         let mut world_type = CompilerType::new(&world_path);
+        world_type.special_class = Some(SpecialClass::World);
         
         let mut output_proc = Proc::new("output", ProcSource::Std(StdProc::WorldOutput));
         output_proc.parameters.push(ProcParameter::new("O", VariableType::Unspecified));

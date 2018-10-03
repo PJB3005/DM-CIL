@@ -219,8 +219,9 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
         class_root.insert_method(method);
     }
 
-    for class in &compiler_state.types {
-        
+    for (path, compiler_type) in compiler_state.types.iter().filter(|(path, _)| path.segment_count() == 1) {
+        let class = create_type(asm, compiler_type, compiler_state, dm_state, &mut stack);
+        class_root.insert_child_class(class);
     }
 
     /*
@@ -243,6 +244,42 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
     */
 
     asm.get_classes_mut().push(class_root);
+}
+
+fn create_type(asm: &mut Assembly, compiler_type: &CompilerType, compiler_state: &CompilerState, dm_state: &DMState, mut type_stack: &mut Vec<String>) -> Class {
+    let parent_type_name = type_stack.join("/");
+    let name = compiler_type.path.last_segment();
+    let mut class = Class::new(name.into(),
+                               ClassAccessibility::NestedPublic,
+                               Some(parent_type_name.clone()),
+                               format!("{}/{}", parent_type_name, name),
+                               false);
+
+    // Make stock .ctor.
+    let ctor = dm_std::create_stock_ctor(&parent_type_name);
+    class.insert_method(ctor);
+
+    for (name, child_proc) in &compiler_type.procs {
+        let method = match &child_proc.source {
+            ProcSource::Std(std) => dm_std::create_std_proc(std),
+            ProcSource::Code(loc) => {
+                proc_transpiler::create_proc(&child_proc, &mut class, &name, true, dm_state, &compiler_state)
+            },
+        };
+
+        class.insert_method(method);
+    }
+
+    type_stack.push(name.into());
+/*
+    for child in noderef.children() {
+        create_class(asm, &mut class, state, child, &mut type_stack);
+    }
+*/
+
+    type_stack.pop();
+
+    class
 }
 
 fn create_node(asm: &mut Assembly, parent: &mut Class, state: &DMState, noderef: TypeRef, mut type_stack: &mut Vec<String>) {

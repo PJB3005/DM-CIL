@@ -18,6 +18,18 @@ impl ByondPath {
             rooted
         }
     }
+
+    pub fn segment_count(&self) -> usize {
+        self.segments.len()
+    }
+
+    pub fn last_segment(&self) -> &str {
+        if self.segment_count() == 0 {
+            panic!("Can't get the segment count on a zero-length path.");
+        }
+
+        &self.segments[self.segments.len()-1]
+    }
 }
 
 impl<'a> From<&'a str> for ByondPath {
@@ -54,6 +66,7 @@ pub struct CompilerType {
     pub path: ByondPath,
     pub children: Vec<String>,
     pub procs: HashMap<String, Proc>,
+    pub special_class: Option<SpecialClass>
 }
 
 impl CompilerType {
@@ -62,8 +75,15 @@ impl CompilerType {
             path: path.clone(),
             children: vec![],
             procs: HashMap::new(),
+            special_class: None
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum SpecialClass
+{
+    World,
 }
 
 #[derive(Clone, Debug)]
@@ -112,6 +132,7 @@ pub enum ProcSource {
 pub enum StdProc {
     Abs,
     WorldOutput,
+    Sin,
     Unimplemented(String)
 }
 
