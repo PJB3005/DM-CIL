@@ -67,10 +67,7 @@ pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, i
 
         Ok(method)
     } else {
-        let mut blob = InstructionBlob::default();
-        blob.not_implemented(&format!("Unable to find proc body: {}, {:?}", proc_name, the_proc));
-
-        Ok(Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, blob, is_static))
+        Err(format!("Unable to find proc body: {}, {:?}", proc_name, the_proc).into())
     }
 }
 
@@ -281,7 +278,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             ins.instruction(Instruction::nop);
         },
         Statement::Break(Some(_)) | Statement::Continue(Some(_)) => {
-            ins.not_implemented("Labelled loop flow control is not implemented yet.");
+            return Err("Labelled loop flow control is not implemented yet.".into());
         },
         Statement::Break(None) => {
             if let Some(label) = data.get_loop_exit_label() {
@@ -289,7 +286,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             }
             else
             {
-                ins.not_implemented("Not in a loop!");
+                return Err("Encountered break outside loop".into());
             }
         },
         Statement::Continue(None) => {
@@ -298,11 +295,11 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             }
             else
             {
-                ins.not_implemented("Not in a loop!");
+                return Err("Encountered break outside loop".into());
             }
         },
         _ => {
-            ins.not_implemented("Unknown Statement.");
+            return Err(format!("unknown statement: {:?}", statement).into());
         }
     };
 
@@ -408,7 +405,7 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                     do_dynamic_invoke(invoke, arg_blob, data, ins);
                 },
                 _ => {
-                    ins.not_implemented("Unknown op");
+                    return Err(format!("Unknown op: {:?}", op).into());
                 },
             };
         },
@@ -421,10 +418,10 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                     }
                     ins.instruction(Instruction::stloc(idx));
                 } else {
-                    ins.not_implemented("No idea what var that is lad.");
+                    return Err(format!("Unknown variable: {}", &varname).into());
                 }
             } else {
-                ins.not_implemented("That lvalue is too complex for me.");
+                return Err("That lvalue is too complex for me.".into());
             }
         },
         _ => {
@@ -464,8 +461,7 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
                 ins.instruction(Instruction::ldloc(idx));
                 Ok(VariableType::Unspecified)
             } else {
-                ins.not_implemented("Unknown identifier.");
-                Ok(VariableType::Unspecified)
+                Err(format!("Unknown identifier: {}", &ident).into())
             }
         },
         Term::String(val) => {
@@ -481,8 +477,7 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
         },
         Term::Call(name, args) => {
             if !data.is_static {
-                ins.not_implemented("Can't do unscoped calls in non static yet.");
-                return Ok(VariableType::Unspecified);
+                return Err("Unscoped non-static calls are not implemented yet.".into());
             }
             let tree = data.state.get_tree();
             let root = tree.root();
@@ -505,8 +500,7 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
             }
         },
         t => {
-            ins.not_implemented(&format!("Unable to handle term: {:?}", t));
-            Ok(VariableType::Unspecified)
+            Err(format!("Unable to handle term: {:?}", t).into())
         }
     }
 }
@@ -530,12 +524,11 @@ fn evaluate_follow(follow: &Follow, will_be_discarded: bool, term_type: Variable
                 },
                 VariableType::Object(path) => {
                     if !data.compiler_state.types.contains_key(&path) {
-                        ins.not_implemented("Unable to find type.".into());
-                        return Ok(VariableType::Unspecified);
+                        return Err("Unable to find type.".into());
                     }
                     let type_instance = &data.compiler_state.types[&path];
                     if !type_instance.procs.contains_key(method_name) {
-                        ins.not_implemented("Unable to find proc.".into())
+                        return Err("Unable to find proc.".into());
                     }
                     
                     //let instance_proc = &type_instance.procs[method_name];
@@ -559,8 +552,7 @@ fn evaluate_follow(follow: &Follow, will_be_discarded: bool, term_type: Variable
             }
         },
         a => {
-            ins.not_implemented(&format!("Non-call follows not implemented: {:?}", a));
-            Ok(VariableType::Unspecified)
+            Err(format!("Non-call follows not implemented: {:?}", a).into())
         }
     }
 }
