@@ -41,6 +41,7 @@ pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, i
             write_statement(statement, &mut data, &mut ins)?;
         }
 
+        ins.instruction(Instruction::ldloc0);
         ins.instruction(Instruction::ret);
 
         let mut method = Method::new(proc_name.to_owned(), "object".into(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
@@ -304,7 +305,8 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             }
         },
         Statement::Return(None) => {
-            ins.instruction(Instruction::ldnull);
+            // Default return value.
+            ins.instruction(Instruction::ldloc0);
             ins.instruction(Instruction::ret);
         },
         Statement::Return(Some(expr)) => {
