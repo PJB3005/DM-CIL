@@ -123,12 +123,23 @@ fn create_everything(dm_state: &DMState) -> CompilerState {
 
     for (name, var) in &tree_root.vars {
         let declaration = var.declaration.as_ref().expect("Global vars should have a declaration, right?");
+        let value = &var.value;
         let var_type = if declaration.var_type.type_path.len() == 0 {
             VariableType::Unspecified
         } else {
             VariableType::Object(ByondPath::new(&declaration.var_type.type_path, true))
         };
-        state.global_vars.insert(name.clone(), GlobalVar { name: name.clone(), var_type });
+        let initializer = if let Some(constant) = &value.constant {
+            Some(VariableInitializer::Constant(constant.clone()))
+        } else if let Some(expr) = &value.expression {
+            Some(VariableInitializer::Expression(expr.clone()))
+        } else { None };
+        let mut global_var = GlobalVar::new(&name, &var_type);
+        global_var.initializer = initializer;
+        if declaration.var_type.is_const {
+            global_var.mutability = VariableMutability::Constant;
+        }
+        state.global_vars.insert(name.clone(), global_var);
     }
 
     for (name, proc_type) in &tree_root.procs {
@@ -197,16 +208,19 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
     stack.push("byond_root".to_owned());
 
     // Create global vars.
-    for (name, _var) in &compiler_state.global_vars {
+    for (name, var) in &compiler_state.global_vars {
         let mut field = Field::default();
         field.name = name.clone();
         field.type_name = "object".into();
         field.is_static = true;
         field.accessibility = FieldAccessibility::Public;
+        if var.mutability != VariableMutability::Normal {
+            field.is_initonly = true;
+        }
         class_root.insert_field(field);
     }
 
-    class_root.insert_method(dm_std::create_global_cctor());
+    class_root.insert_method(dm_std::create_global_cctor(compiler_state));
     class_root.insert_method(dm_std::create_stock_ctor("[mscorlib]System.Object"));
 
     for (name, global_proc) in &compiler_state.global_procs {
@@ -352,7 +366,7 @@ fn get_il_file(opt: &Opt) -> std::io::Result<(PathBuf, Box<std::io::Write>)> {
     }
 }
 
-fn compiler_warning<A>(string: A) where A : AsRef<str> {
+pub fn compiler_warning<A>(string: A) where A : AsRef<str> {
     println!("WARNING: {}", string.as_ref());
 }
 

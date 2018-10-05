@@ -52,6 +52,7 @@ enum CodePart {
 #[allow(non_camel_case_types, dead_code)]
 #[derive(Clone, Debug)]
 pub enum Instruction {
+    add,
     _box(String),
     brfalse(String),
     brtrue(String),
@@ -60,6 +61,7 @@ pub enum Instruction {
     callvirt(String),
     castclass(String),
     ceq,
+    cgt,
     convr4,
     convr8,
     dup,
@@ -95,6 +97,7 @@ impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Instruction::*;
         match self {
+            add => write!(f, "add"),
             _box(meta) => write!(f, "box {}", meta),
             brfalse(label) => write!(f, "brfalse {}", label),
             brtrue(label) => write!(f, "brtrue {}", label),
@@ -103,6 +106,7 @@ impl fmt::Display for Instruction {
             callvirt(meta) => write!(f, "callvirt {}", meta),
             castclass(class) => write!(f, "castclass {}", class),
             ceq => write!(f, "ceq"),
+            cgt => write!(f, "cgt"),
             convr4 => write!(f, "conv.r4"),
             convr8 => write!(f, "conv.r8"),
             dup => write!(f, "dup"), 

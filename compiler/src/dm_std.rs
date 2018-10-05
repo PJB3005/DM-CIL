@@ -1,5 +1,7 @@
+use super::compiler_warning;
 use super::il::*;
 use super::compiler_state::*;
+use dreammaker::constants::Constant;
 
 /*
 pub fn create_world_class(parent: &mut Class) {
@@ -21,11 +23,46 @@ pub fn create_world_class(parent: &mut Class) {
 }
 */
 
-pub fn create_global_cctor() -> Method {
+pub fn create_global_cctor(state: &CompilerState) -> Method {
     let mut code = InstructionBlob::default();
     code.instruction(Instruction::newobj("instance void byond_root/world::'.ctor' ()".to_owned()));
     code.instruction(Instruction::stsfld("object byond_root::world".to_owned()));
+
+    for (name, var) in &state.global_vars {
+        let field_name = format!("object byond_root::{}", name);
+        match &var.initializer {
+            Some(VariableInitializer::Constant(constant)) => {
+                match constant {
+                    // Null is already loaded in those vars so yay.
+                    Constant::Null(_) => {},
+                    Constant::Int(val) => {
+                        code.instruction(Instruction::ldcr4(*val as f32));
+                        code.instruction(Instruction::_box("[mscorlib]System.Single".into()));
+                        code.instruction(Instruction::stsfld(field_name));
+                    },
+                    Constant::Float(val) => {
+                        code.instruction(Instruction::ldcr4(*val));
+                        code.instruction(Instruction::_box("[mscorlib]System.Single".into()));
+                        code.instruction(Instruction::stsfld(field_name));
+                    },
+                    Constant::String(string) => {
+                        code.instruction(Instruction::ldstr(string.clone()));
+                        code.instruction(Instruction::stsfld(field_name));
+                    },
+                    _ => {
+                        compiler_warning(format!("Unable to write constant initializer for global var {}", name))
+                    },
+                }
+            },
+            Some(VariableInitializer::Expression(expression)) => {
+                println!("{}", &name);
+            },
+            None => {}
+        };
+    }
+
     code.instruction(Instruction::ret);
+
     let mut cctor = Method::new(".cctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, true);
     cctor.is_rt_special_name = true;
     cctor.is_special_name = true;
@@ -37,7 +74,7 @@ pub fn create_global_cctor() -> Method {
 pub fn create_stock_ctor(parent_name: &str) -> Method {
     let mut code = InstructionBlob::default();
     code.instruction(Instruction::ldarg0);
-    code.instruction(Instruction::call(format!("instance void {}::.ctor()", parent_name)));
+    code.instruction(Instruction::callvirt(format!("instance void {}::.ctor()", parent_name)));
     code.instruction(Instruction::ret);
 
     let mut ctor = Method::new(".ctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, false);
@@ -80,6 +117,20 @@ pub fn create_std_proc(std_proc: &StdProc) -> Method {
             method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".into()));
             method.code.instruction(Instruction::convr8);
             method.code.instruction(Instruction::call("float64 [mscorlib]System.Math::Sin(float64)".into()));
+            method.code.instruction(Instruction::convr4);
+            method.code.instruction(Instruction::_box("[mscorlib]System.Single".into()));
+            method.code.instruction(Instruction::ret);
+
+            method.params.push(MethodParameter::new("X", "object"));
+            method.maxstack = 1;
+            method
+        },
+        StdProc::Cos => {
+            let mut method = Method::new("cos".into(), "object".into(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, InstructionBlob::default(), true);
+            method.code.instruction(Instruction::ldarg0);
+            method.code.instruction(Instruction::unboxany("[mscorlib]System.Single".into()));
+            method.code.instruction(Instruction::convr8);
+            method.code.instruction(Instruction::call("float64 [mscorlib]System.Math::Cos(float64)".into()));
             method.code.instruction(Instruction::convr4);
             method.code.instruction(Instruction::_box("[mscorlib]System.Single".into()));
             method.code.instruction(Instruction::ret);
@@ -148,6 +199,12 @@ pub fn create_std(state: &mut CompilerState) {
         state.global_procs.insert(proc_sin.name.clone(), proc_sin);
     }
 
+    {
+        let mut proc_sin = Proc::new("cos", ProcSource::Std(StdProc::Cos));
+        proc_sin.parameters.push(ProcParameter::new("X", VariableType::Unspecified));
+        state.global_procs.insert(proc_sin.name.clone(), proc_sin);
+    }
+
     // Create world.
     {
         let world_path = "/world".into();
@@ -160,7 +217,8 @@ pub fn create_std(state: &mut CompilerState) {
 
         state.types.insert(world_path.clone(), world_type);
 
-        let world_var = GlobalVar { name: "world".into(), var_type: VariableType::Object(world_path)};
+        let mut world_var = GlobalVar::new("world", &VariableType::Object(world_path));
+        world_var.mutability = VariableMutability::Readonly;
         state.global_vars.insert("world".into(), world_var);
     }
 }

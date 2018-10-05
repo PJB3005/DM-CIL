@@ -241,6 +241,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             data.push_loop_scope(test_label.clone(), exit_label.clone());
 
             ins.label(test_label.clone());
+            println!("{:?}", &exp);
             evaluate_expression(exp, false, data, ins)?;
             evaluate_truthy(ins);
             ins.instruction(Instruction::brfalse(exit_label.clone()));
@@ -326,6 +327,8 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             if will_be_discarded {
                 ins.instruction(Instruction::pop);
             }
+
+            return Ok(term_type);
         },
         Expression::BinaryOp { op, lhs, rhs } => {
             match op {
@@ -450,16 +453,22 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
             Ok(VariableType::Unspecified)
         }
         Term::Ident(ident) => {
-            if ident == "world" {
-                ins.instruction(Instruction::ldsfld("object byond_root::world".to_owned()));
-                ins.instruction(Instruction::castclass("byond_root/world".into()));
-                Ok(VariableType::Object("/world".into()))
-            } else if ident == "src" {
+            if ident == "src" {
                 ins.instruction(Instruction::ldarg0);
                 Ok(VariableType::Unspecified)
             } else if let Some(idx) = data.get_local(ident) {
                 ins.instruction(Instruction::ldloc(idx));
                 Ok(VariableType::Unspecified)
+            } else if data.compiler_state.global_vars.contains_key(ident) {
+                let global = data.compiler_state.global_vars.get(ident).unwrap();
+                ins.instruction(Instruction::ldsfld(format!("object byond_root::{}", ident)));
+                match &global.var_type {
+                    VariableType::Object(path) => {
+                        ins.instruction(Instruction::castclass(byond_path_to_class(path)));
+                    },
+                    VariableType::Unspecified => {}
+                };
+                Ok(global.var_type.clone())
             } else {
                 Err(format!("Unknown identifier: {}", &ident).into())
             }
@@ -608,6 +617,7 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
             type_name: call_site_calltype.clone(),
             accessibility: FieldAccessibility::Public,
             is_static: true,
+            is_initonly: false,
         });
         let meta_field_name_full = format!("{} {}::'{}'", call_site_calltype, meta_class.get_full_name(), meta_field_name);
         (call_type, arg_count, call_site_calltype, meta_field_name_full)
@@ -768,4 +778,10 @@ fn bool_to_float(data: &mut TranspilerData, ins: &mut InstructionBlob) {
     ins.instruction(Instruction::ldcr4(1f32));
     ins.label(escape_label);
     ins.instruction(Instruction::_box("[mscorlib]System.Single".to_owned()));
+}
+
+pub fn byond_path_to_class(path: &ByondPath) -> String {
+    assert!(path.is_rooted());
+
+    format!("byond_root{}", path)
 }

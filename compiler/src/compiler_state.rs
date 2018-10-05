@@ -1,6 +1,8 @@
 use std::fmt;
 use std::collections::HashMap;
 use dreammaker::Location;
+use dreammaker::ast::*;
+use dreammaker::constants::Constant;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct ByondPath {
@@ -30,6 +32,10 @@ impl ByondPath {
         }
 
         &self.segments[self.segments.len()-1]
+    }
+
+    pub fn is_rooted(&self) -> bool {
+        self.rooted
     }
 }
 
@@ -143,6 +149,7 @@ pub enum StdProc {
     Abs,
     WorldOutput,
     Sin,
+    Cos,
     Unimplemented(String)
 }
 
@@ -156,4 +163,30 @@ pub enum VariableType {
 pub struct GlobalVar {
     pub name: String,
     pub var_type: VariableType,
+    pub initializer: Option<VariableInitializer>,
+    pub mutability: VariableMutability
+}
+
+impl GlobalVar {
+    pub fn new<A>(name: A, var_type: &VariableType) -> GlobalVar where A: AsRef<str> {
+        GlobalVar {
+            name: name.as_ref().to_owned(),
+            var_type: var_type.clone(),
+            initializer: None,
+            mutability: VariableMutability::Normal
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum VariableInitializer {
+    Constant(Constant),
+    Expression(Expression),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VariableMutability {
+    Normal,
+    Readonly,
+    Constant
 }
