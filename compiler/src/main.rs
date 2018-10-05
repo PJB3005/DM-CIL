@@ -5,9 +5,10 @@ extern crate dreammaker;
 extern crate structopt;
 extern crate tempfile;
 
+use std::fmt;
+use dreammaker::Location;
 use dreammaker as dm;
-use dm::objtree::{TypeRef, ProcDeclaration};
-use dm::{FILEID_BUILTINS, Location};
+use dm::FILEID_BUILTINS;
 use std::fs::File;
 use std::path::PathBuf;
 use std::process::Command;
@@ -19,7 +20,7 @@ mod proc_transpiler;
 mod compiler_state;
 
 use dmstate::DMState;
-use il::{Assembly, Class, ClassAccessibility, Field, InstructionBlob, Method, Instruction, MethodAccessibility, MethodVirtuality, FieldAccessibility};
+use il::{Assembly, Class, ClassAccessibility, Field, Instruction, FieldAccessibility};
 use compiler_state::*;
 
 use structopt::StructOpt;
@@ -132,7 +133,7 @@ fn create_everything(dm_state: &DMState) -> CompilerState {
 
     for (name, proc_type) in &tree_root.procs {
         if proc_type.value.len() > 1 {
-            println!("Skipping proc with multiple values: {}", &name);
+            compiler_warning(format!("Skipping proc with multiple values: {}", &name));
             continue;
         }
 
@@ -150,7 +151,7 @@ fn create_everything(dm_state: &DMState) -> CompilerState {
             ProcSource::Code(value.location)
         };
 
-        let mut global_proc = Proc::new(&name, ProcSource::Code(value.location));
+        let mut global_proc = Proc::new(&name, source);
         for param in &value.parameters {
             let var_type = if param.path.len() > 0 {
                 VariableType::Object(ByondPath::new(&param.path, true))
@@ -196,7 +197,7 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
     stack.push("byond_root".to_owned());
 
     // Create global vars.
-    for (name, var) in &compiler_state.global_vars {
+    for (name, _var) in &compiler_state.global_vars {
         let mut field = Field::default();
         field.name = name.clone();
         field.type_name = "object".into();
@@ -210,16 +211,19 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
 
     for (name, global_proc) in &compiler_state.global_procs {
         let method = match &global_proc.source {
-            ProcSource::Std(std) => dm_std::create_std_proc(std),
-            ProcSource::Code(loc) => {
+            ProcSource::Std(std) => Ok(dm_std::create_std_proc(std)),
+            ProcSource::Code(_loc) => {
                 proc_transpiler::create_proc(&global_proc, &mut class_root, &name, true, dm_state, &compiler_state)
             },
         };
 
-        class_root.insert_method(method);
+        match method {
+            Ok(method) => {class_root.insert_method(method);},
+            Err(error) => println!("ERROR in proc {}: {}", name, error)
+        };
     }
 
-    for (path, compiler_type) in compiler_state.types.iter().filter(|(path, _)| path.segment_count() == 1) {
+    for (_path, compiler_type) in compiler_state.types.iter().filter(|(path, _)| path.segment_count() == 1) {
         let class = create_type(asm, compiler_type, compiler_state, dm_state, &mut stack);
         class_root.insert_child_class(class);
     }
@@ -246,7 +250,7 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
     asm.get_classes_mut().push(class_root);
 }
 
-fn create_type(asm: &mut Assembly, compiler_type: &CompilerType, compiler_state: &CompilerState, dm_state: &DMState, mut type_stack: &mut Vec<String>) -> Class {
+fn create_type(_asm: &mut Assembly, compiler_type: &CompilerType, compiler_state: &CompilerState, dm_state: &DMState, type_stack: &mut Vec<String>) -> Class {
     let parent_type_name = type_stack.join("/");
     let name = compiler_type.path.last_segment();
     let mut class = Class::new(name.into(),
@@ -261,13 +265,16 @@ fn create_type(asm: &mut Assembly, compiler_type: &CompilerType, compiler_state:
 
     for (name, child_proc) in &compiler_type.procs {
         let method = match &child_proc.source {
-            ProcSource::Std(std) => dm_std::create_std_proc(std),
-            ProcSource::Code(loc) => {
+            ProcSource::Std(std) => Ok(dm_std::create_std_proc(std)),
+            ProcSource::Code(_loc) => {
                 proc_transpiler::create_proc(&child_proc, &mut class, &name, true, dm_state, &compiler_state)
             },
         };
 
-        class.insert_method(method);
+        match method {
+            Ok(method) => {class.insert_method(method);},
+            Err(error) => println!("ERROR in proc {}: {}", name, error)
+        };
     }
 
     type_stack.push(name.into());
@@ -282,6 +289,7 @@ fn create_type(asm: &mut Assembly, compiler_type: &CompilerType, compiler_state:
     class
 }
 
+/*
 fn create_node(asm: &mut Assembly, parent: &mut Class, state: &DMState, noderef: TypeRef, mut type_stack: &mut Vec<String>) {
     // NOTE: parent is for the HIERARCHY, NOT inheritance.
 
@@ -330,6 +338,7 @@ fn create_vars(node: TypeRef, class: &mut Class) {
         class.insert_field(field);
     }
 }
+*/
 
 fn get_il_file(opt: &Opt) -> std::io::Result<(PathBuf, Box<std::io::Write>)> {
     if let Some(il_path) = &opt.il_path {
@@ -340,5 +349,32 @@ fn get_il_file(opt: &Opt) -> std::io::Result<(PathBuf, Box<std::io::Write>)> {
         }
         let tmp = tempfile::NamedTempFile::new()?;
         Ok((tmp.path().to_owned(), Box::new(tmp)))
+    }
+}
+
+fn compiler_warning<A>(string: A) where A : AsRef<str> {
+    println!("WARNING: {}", string.as_ref());
+}
+
+#[derive(Clone, Debug)]
+pub struct CompilerError {
+    pub location: Option<Location>,
+    pub end_location: Option<Location>,
+    pub message: String,
+}
+
+impl<A> From<A> for CompilerError where A : AsRef<str> {
+    fn from(string_ref: A) -> CompilerError {
+        CompilerError {
+            location: None,
+            end_location: None,
+            message: string_ref.as_ref().to_owned()
+        }
+    }
+}
+
+impl fmt::Display for CompilerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(formatter, "{}", &self.message)
     }
 }

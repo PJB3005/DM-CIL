@@ -1,6 +1,7 @@
 use super::il::*;
 use super::compiler_state::*;
 
+/*
 pub fn create_world_class(parent: &mut Class) {
     let mut class = Class::new("world".to_owned(), ClassAccessibility::NestedPublic, Some("byond_root".to_owned()), "byond_root/world".to_owned(), false);
     
@@ -18,6 +19,7 @@ pub fn create_world_class(parent: &mut Class) {
 
     parent.insert_child_class(class);
 }
+*/
 
 pub fn create_global_cctor() -> Method {
     let mut code = InstructionBlob::default();
