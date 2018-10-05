@@ -1,6 +1,8 @@
+use dmstate::DMState;
 use super::compiler_warning;
 use super::il::*;
 use super::compiler_state::*;
+use super::proc_transpiler::evaluate_initializer;
 use dreammaker::constants::Constant;
 
 /*
@@ -23,7 +25,7 @@ pub fn create_world_class(parent: &mut Class) {
 }
 */
 
-pub fn create_global_cctor(state: &CompilerState) -> Method {
+pub(crate) fn create_global_cctor(dm_state: &DMState, state: &CompilerState, class: &mut Class) -> Method {
     let mut code = InstructionBlob::default();
     code.instruction(Instruction::newobj("instance void byond_root/world::'.ctor' ()".to_owned()));
     code.instruction(Instruction::stsfld("object byond_root::world".to_owned()));
@@ -55,7 +57,14 @@ pub fn create_global_cctor(state: &CompilerState) -> Method {
                 }
             },
             Some(VariableInitializer::Expression(expression)) => {
-                println!("{}", &name);
+                match evaluate_initializer(&expression, class, &format!("{}_init", &name), dm_state, state, &mut code) {
+                    Ok(_var_type) => {
+                        code.instruction(Instruction::stsfld(field_name));
+                    },
+                    Err(error) => {
+                        println!("ERROR in initializer for {}: {:?}", name, error);
+                    }
+                }
             },
             None => {}
         };
@@ -66,7 +75,7 @@ pub fn create_global_cctor(state: &CompilerState) -> Method {
     let mut cctor = Method::new(".cctor".to_owned(), "void".to_owned(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, true);
     cctor.is_rt_special_name = true;
     cctor.is_special_name = true;
-    cctor.maxstack = 1;
+    cctor.maxstack = 16;
 
     cctor
 }

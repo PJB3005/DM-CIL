@@ -10,15 +10,6 @@ use super::compiler_state::*;
 
 pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, is_static: bool,
                           state: &DMState, compiler_state: &CompilerState) -> Result<Method, CompilerError> {
-    let is_entry_point = proc_name == "EntryPoint";
-    let return_type = if is_entry_point {
-        "void".to_owned()
-    } else {
-        "object".to_owned()
-    };
-
-    //println!("{}: {:?}", proc_name, procdef);
-
     if let Some(code) = get_proc_body_details(the_proc, state) {
         let mut data = TranspilerData {
             total_locals: 1,
@@ -50,12 +41,9 @@ pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, i
             write_statement(statement, &mut data, &mut ins)?;
         }
 
-        if !is_entry_point {
-            ins.instruction(Instruction::ldloc0);
-        }
         ins.instruction(Instruction::ret);
 
-        let mut method = Method::new(proc_name.to_owned(), return_type, MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
+        let mut method = Method::new(proc_name.to_owned(), "object".into(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
 
         for param in &the_proc.parameters {
             method.params.push(MethodParameter::new(&param.name, "object"));
@@ -69,6 +57,22 @@ pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, i
     } else {
         Err(format!("Unable to find proc body: {}, {:?}", proc_name, the_proc).into())
     }
+}
+
+pub(crate) fn evaluate_initializer(expression: &Expression, class: &mut Class, proc_name: &str, dm_state: &DMState, compiler_state: &CompilerState, blob: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
+    let mut data = TranspilerData {
+        total_locals: 0,
+        locals: vec![],
+        uniques: 0,
+        state: dm_state,
+        compiler_state,
+        is_static: true,
+        proc_name,
+        class,
+        loop_labels: vec![]
+    };
+
+    evaluate_expression(expression, false, &mut data, blob)
 }
 
 /// Shared data necessary across the entire proc transpile.
@@ -299,6 +303,14 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
                 return Err("Encountered break outside loop".into());
             }
         },
+        Statement::Return(None) => {
+            ins.instruction(Instruction::ldnull);
+            ins.instruction(Instruction::ret);
+        },
+        Statement::Return(Some(expr)) => {
+            evaluate_expression(&expr, false, data, ins)?;
+            ins.instruction(Instruction::ret);
+        }
         _ => {
             return Err(format!("unknown statement: {:?}", statement).into());
         }

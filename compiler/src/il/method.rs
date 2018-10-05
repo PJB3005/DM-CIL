@@ -15,6 +15,7 @@ pub struct Method {
     pub params: Vec<MethodParameter>,
     pub locals: Vec<String>,
     pub maxstack: u16,
+    pub is_entry_point: bool,
 }
 
 impl Method {
@@ -36,6 +37,7 @@ impl Method {
             params: vec![],
             locals: vec![],
             maxstack: 32,
+            is_entry_point: false
         }
     }
 
@@ -57,13 +59,9 @@ impl Method {
         }
 
         writeln!(writer, ") cil managed\n{{")?;
-
-        if self.name == "EntryPoint" {
-            // TODO: Make this less hacky.
+        if self.is_entry_point {
             writeln!(writer, ".entrypoint")?;
         }
-
-        
         writeln!(writer, ".maxstack {}", self.maxstack)?;
 
         if self.locals.len() != 0 {

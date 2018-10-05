@@ -20,7 +20,7 @@ mod proc_transpiler;
 mod compiler_state;
 
 use dmstate::DMState;
-use il::{Assembly, Class, ClassAccessibility, Field, Instruction, FieldAccessibility};
+use il::*;
 use compiler_state::*;
 
 use structopt::StructOpt;
@@ -129,11 +129,13 @@ fn create_everything(dm_state: &DMState) -> CompilerState {
         } else {
             VariableType::Object(ByondPath::new(&declaration.var_type.type_path, true))
         };
+        
         let initializer = if let Some(constant) = &value.constant {
             Some(VariableInitializer::Constant(constant.clone()))
         } else if let Some(expr) = &value.expression {
             Some(VariableInitializer::Expression(expr.clone()))
         } else { None };
+        
         let mut global_var = GlobalVar::new(&name, &var_type);
         global_var.initializer = initializer;
         if declaration.var_type.is_const {
@@ -220,8 +222,20 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
         class_root.insert_field(field);
     }
 
-    class_root.insert_method(dm_std::create_global_cctor(compiler_state));
+    let global_cctor = dm_std::create_global_cctor(dm_state, compiler_state, &mut class_root);
+    class_root.insert_method(global_cctor);
     class_root.insert_method(dm_std::create_stock_ctor("[mscorlib]System.Object"));
+
+    {
+        let mut code = InstructionBlob::default();
+        code.instruction(Instruction::call("object byond_root::main()".into()));
+        code.instruction(Instruction::pop);
+        code.instruction(Instruction::ret);
+        let mut entry_point = Method::new("<>EntryPoint".into(), "void".into(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, true);
+        entry_point.is_entry_point = true;
+        entry_point.maxstack = 1;
+        class_root.insert_method(entry_point);
+    }
 
     for (name, global_proc) in &compiler_state.global_procs {
         let method = match &global_proc.source {
