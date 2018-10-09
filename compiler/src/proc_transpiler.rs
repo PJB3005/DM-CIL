@@ -73,7 +73,7 @@ pub(crate) fn evaluate_initializer(expression: &Expression, class: &mut Class, p
         loop_labels: vec![]
     };
 
-    evaluate_expression(expression, false, &mut data, blob)
+    evaluate_expression(expression, &mut data, blob)
 }
 
 /// Shared data necessary across the entire proc transpile.
@@ -185,12 +185,13 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
     // RULE: when this function is done, the stack is the same as before.
     match statement {
         Statement::Expr(exp) => {
-            evaluate_expression(exp, true, data, ins)?;
+            evaluate_expression(exp, data, ins)?;
+            ins.instruction(Instruction::pop);
         },
         Statement::Var(VarStatement { name, value, .. }) => {
             let idx = data.add_local(name);
             if let Some(initializer) = value {
-                evaluate_expression(initializer, false, data, ins)?;
+                evaluate_expression(initializer, data, ins)?;
                 ins.instruction(Instruction::stloc(idx));
             }
         },
@@ -207,7 +208,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
                 // I put a nop after most labels so that something if like evaluate_expression ALSO writes a label,
                 // because 2 labels on the same opcode would break.
                 ins.instruction(Instruction::nop);
-                evaluate_expression(expr, false, data, ins)?;
+                evaluate_expression(expr, data, ins)?;
                 evaluate_truthy(ins);
                 // There is another else if.
                 if i != ifcount - 1 {
@@ -247,7 +248,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
 
             ins.label(test_label.clone());
             println!("{:?}", &exp);
-            evaluate_expression(exp, false, data, ins)?;
+            evaluate_expression(exp, data, ins)?;
             evaluate_truthy(ins);
             ins.instruction(Instruction::brfalse(exit_label.clone()));
 
@@ -277,7 +278,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
 
             ins.label(test_label);
             ins.instruction(Instruction::nop);
-            evaluate_expression(exp, false, data, ins)?;
+            evaluate_expression(exp, data, ins)?;
             ins.instruction(Instruction::call("bool class [DM]DM.DmInternal::Truthy(object)".to_owned()));
             ins.instruction(Instruction::brtrue(repeat_label));
             ins.label(exit_label);
@@ -310,7 +311,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             ins.instruction(Instruction::ret);
         },
         Statement::Return(Some(expr)) => {
-            evaluate_expression(&expr, false, data, ins)?;
+            evaluate_expression(&expr, data, ins)?;
             ins.instruction(Instruction::ret);
         }
         _ => {
@@ -321,8 +322,8 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
     Ok(())
 }
 
-fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
-    // RULE: when this function is done, ONE extra value on the stack ONLY if will_be_discarded is false.
+fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
+    // RULE: when this function is done, ONE extra value on the stack.
     match expression {
         Expression::Base { unary, term, follow } => {
             let mut term_blob = InstructionBlob::default();
@@ -330,7 +331,7 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             for follow in follow.iter().rev() {
                 let old_blob = term_blob;
                 term_blob = InstructionBlob::default();
-                term_type = evaluate_follow(follow, will_be_discarded, term_type, old_blob, data, &mut term_blob)?;
+                term_type = evaluate_follow(follow, term_type, old_blob, data, &mut term_blob)?;
             };
 
             for _unary in unary.iter().rev() {
@@ -338,10 +339,6 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
             }
 
             ins.absord(term_blob);
-            if will_be_discarded {
-                ins.instruction(Instruction::pop);
-            }
-
             return Ok(term_type);
         },
         Expression::BinaryOp { op, lhs, rhs } => {
@@ -358,65 +355,56 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
                 | BinaryOp::LessEq
                 | BinaryOp::Mod => {
                     let mut arg_blob = InstructionBlob::default();
-                    evaluate_expression(lhs, false, data, &mut arg_blob)?;
-                    evaluate_expression(rhs, false, data, &mut arg_blob)?;
+                    evaluate_expression(lhs, data, &mut arg_blob)?;
+                    evaluate_expression(rhs, data, &mut arg_blob)?;
                     do_dynamic_invoke(DynamicInvokeType::BinaryOp(*op), arg_blob, data, ins);
-                    if will_be_discarded {
-                        ins.instruction(Instruction::pop);
-                    } else {
-                        match op {
-                            BinaryOp::Eq
-                            | BinaryOp::NotEq
-                            | BinaryOp::Greater
-                            | BinaryOp::GreaterEq 
-                            | BinaryOp::Less
-                            | BinaryOp::LessEq => {
-                                ins.instruction(Instruction::unboxany("[mscorlib]System.Boolean".to_owned()));
-                                bool_to_float(data, ins)
-                            },
-                            _ => {}
-                        };
+
+                    match op {
+                        BinaryOp::Eq
+                        | BinaryOp::NotEq
+                        | BinaryOp::Greater
+                        | BinaryOp::GreaterEq 
+                        | BinaryOp::Less
+                        | BinaryOp::LessEq => {
+                            ins.instruction(Instruction::unboxany("[mscorlib]System.Boolean".to_owned()));
+                            bool_to_float(data, ins)
+                        },
+                        _ => {}
                     };
                 },
                 BinaryOp::And => {
                     let uniq = data.get_uniq();
                     let exit = format!("opand_lhs_false_{}", uniq);
-                    evaluate_expression(lhs, false, data, ins)?;
+                    evaluate_expression(lhs, data, ins)?;
                     ins.instruction(Instruction::dup);
                     evaluate_truthy(ins);
                     ins.instruction(Instruction::brfalse(exit.clone()));
                     ins.instruction(Instruction::pop);
 
-                    evaluate_expression(rhs, false, data, ins)?;
+                    evaluate_expression(rhs, data, ins)?;
                     ins.label(exit);
                     ins.instruction(Instruction::nop);
-                    if will_be_discarded {
-                        ins.instruction(Instruction::pop);
-                    }
                 },
                 BinaryOp::Or => {
                     let uniq = data.get_uniq();
                     let exit = format!("opor_lhs_true_{}", uniq);
-                    evaluate_expression(lhs, false, data, ins)?;
+                    evaluate_expression(lhs, data, ins)?;
                     ins.instruction(Instruction::dup);
                     evaluate_truthy(ins);
                     ins.instruction(Instruction::brtrue(exit.clone()));
                     ins.instruction(Instruction::pop);
 
-                    evaluate_expression(rhs, false, data, ins)?;
+                    evaluate_expression(rhs, data, ins)?;
                     ins.label(exit);
                     ins.instruction(Instruction::nop);
-                    if will_be_discarded {
-                        ins.instruction(Instruction::pop);
-                    }
                 },
                 BinaryOp::LShift => {
                     let mut arg_blob = InstructionBlob::default();
-                    evaluate_expression(lhs, false, data, &mut arg_blob)?;
-                    evaluate_expression(rhs, false, data, &mut arg_blob)?;
+                    evaluate_expression(lhs, data, &mut arg_blob)?;
+                    evaluate_expression(rhs, data, &mut arg_blob)?;
                     let invoke = DynamicInvokeType::MemberInvoke {
                         arg_count: 1,
-                        expect_return: false,
+                        expect_return: true,
                         method_name: "output".to_owned()
                     };
                     do_dynamic_invoke(invoke, arg_blob, data, ins);
@@ -429,10 +417,8 @@ fn evaluate_expression(expression: &Expression, will_be_discarded: bool, data: &
         Expression::AssignOp { op: AssignOp::Assign, lhs, rhs } => {
             if let Expression::Base { term: Term::Ident(varname), .. } = *lhs.clone() {
                 if let Some(idx) = data.get_local(&varname) {
-                    evaluate_expression(rhs, false, data, ins)?;
-                    if !will_be_discarded {
-                        ins.instruction(Instruction::dup);
-                    }
+                    evaluate_expression(rhs, data, ins)?;
+                    ins.instruction(Instruction::dup);
                     ins.instruction(Instruction::stloc(idx));
                 } else {
                     return Err(format!("Unknown variable: {}", &varname).into());
@@ -492,7 +478,7 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
             Ok(VariableType::Unspecified)
         },
         Term::Expr(expr) => {
-            evaluate_expression(expr, false, data, ins)
+            evaluate_expression(expr, data, ins)
         },
         Term::ReturnValue => {
             ins.instruction(Instruction::ldloc0);
@@ -514,7 +500,7 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
                 }
                 //println!("{:?}", proc);
                 for expr in args {
-                    evaluate_expression(expr, false, data, ins)?;
+                    evaluate_expression(expr, data, ins)?;
                 }
                 ins.instruction(Instruction::call(format!("object byond_root::{}({})", name, args_tok)));
                 Ok(VariableType::Unspecified)
@@ -528,19 +514,18 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
     }
 }
 
-fn evaluate_follow(follow: &Follow, will_be_discarded: bool, term_type: VariableType, mut term_blob: InstructionBlob, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
-    // When this function is done, there is an extra value on the stack IF !will_be_discarded 
+fn evaluate_follow(follow: &Follow, term_type: VariableType, mut term_blob: InstructionBlob, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
     match follow {
         Follow::Call(_, method_name, args) => {
             for arg in args {
-                evaluate_expression(arg, false, data, &mut term_blob)?;
+                evaluate_expression(arg, data, &mut term_blob)?;
             }
 
             match term_type {
                 VariableType::Unspecified => {
                     do_dynamic_invoke(DynamicInvokeType::MemberInvoke {
                         arg_count: args.len() as u16,
-                        expect_return: !will_be_discarded,
+                        expect_return: true,
                         method_name: method_name.clone()
                     }, term_blob, data, ins);
                     Ok(VariableType::Unspecified)
@@ -729,7 +714,7 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
     match invoke_type {
         DynamicInvokeType::MemberInvoke { expect_return, arg_count, .. } => {
             let ret_type = if expect_return {
-                format!("!{}", arg_count+1)
+                format!("!{}", arg_count+2)
             } else {
                 "void".to_owned()
             };
