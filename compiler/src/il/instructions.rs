@@ -4,7 +4,7 @@ use std::io;
 /// Responsible for turning instructions into CIL code.
 #[derive(Clone, Default)]
 pub struct InstructionBlob {
-    code: Vec<CodePart>
+    code: Vec<CodePart>,
 }
 
 impl InstructionBlob {
@@ -32,7 +32,9 @@ impl InstructionBlob {
         // I love these.
         // You can literally put them ANYWHERE.
         self.instruction(Instruction::ldstr(reason.to_owned()));
-        self.instruction(Instruction::newobj("instance void [mscorlib]System.NotImplementedException::'.ctor' (string)".to_owned()));
+        self.instruction(Instruction::newobj(
+            "instance void [mscorlib]System.NotImplementedException::'.ctor' (string)".to_owned(),
+        ));
         self.instruction(Instruction::throw);
     }
 
@@ -44,7 +46,7 @@ impl InstructionBlob {
 #[derive(Clone, Debug)]
 enum CodePart {
     Instruction(Instruction),
-    Label(String)
+    Label(String),
 }
 
 /// The CIL instruction set,
@@ -109,7 +111,7 @@ impl fmt::Display for Instruction {
             cgt => write!(f, "cgt"),
             convr4 => write!(f, "conv.r4"),
             convr8 => write!(f, "conv.r8"),
-            dup => write!(f, "dup"), 
+            dup => write!(f, "dup"),
             ldarg(num) => write!(f, "ldarg {}", num),
             ldarg0 => write!(f, "ldarg.0"),
             ldarg1 => write!(f, "ldarg.1"),
@@ -141,8 +143,9 @@ impl fmt::Display for Instruction {
 }
 
 fn escape_string(string: &str) -> String {
-    string.replace(r"\", r"\\")
-          .replace(r#"""#, r#"\""#)
-          .replace("\n", r"\n")
-          .replace("\t", r"\t")
+    string
+        .replace(r"\", r"\\")
+        .replace(r#"""#, r#"\""#)
+        .replace("\n", r"\n")
+        .replace("\t", r"\t")
 }

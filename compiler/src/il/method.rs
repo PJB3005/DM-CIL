@@ -1,6 +1,6 @@
+use super::InstructionBlob;
 use std::fmt;
 use std::io;
-use super::InstructionBlob;
 
 #[derive(Default)]
 pub struct Method {
@@ -19,12 +19,14 @@ pub struct Method {
 }
 
 impl Method {
-    pub fn new(name: String,
-               return_type: String,
-               accessibility: MethodAccessibility,
-               virtuality: MethodVirtuality,
-               code: InstructionBlob,
-               is_static: bool) -> Method {
+    pub fn new(
+        name: String,
+        return_type: String,
+        accessibility: MethodAccessibility,
+        virtuality: MethodVirtuality,
+        code: InstructionBlob,
+        is_static: bool,
+    ) -> Method {
         Method {
             name,
             return_type,
@@ -37,20 +39,31 @@ impl Method {
             params: vec![],
             locals: vec![],
             maxstack: 32,
-            is_entry_point: false
+            is_entry_point: false,
         }
     }
 
     pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writeln!(writer, ".method hidebysig {} {} {} {} {} default {} '{}' (",
-               if self.is_rt_special_name { "rtspecialname" } else { "" },
-               if self.is_special_name { "specialname" } else { "" },
-               self.accessibility,
-               self.virtuality,
-               if self.is_static { "static" } else { "instance" },
-               self.return_type,
-               self.name)?;
-        
+        writeln!(
+            writer,
+            ".method hidebysig {} {} {} {} {} default {} '{}' (",
+            if self.is_rt_special_name {
+                "rtspecialname"
+            } else {
+                ""
+            },
+            if self.is_special_name {
+                "specialname"
+            } else {
+                ""
+            },
+            self.accessibility,
+            self.virtuality,
+            if self.is_static { "static" } else { "instance" },
+            self.return_type,
+            self.name
+        )?;
+
         for (i, param) in self.params.iter().enumerate() {
             if i != 0 {
                 write!(writer, ", ")?;
@@ -95,7 +108,7 @@ impl MethodParameter {
         MethodParameter {
             name: name.to_owned(),
             type_name: type_name.to_owned(),
-            custom_attributes: vec![],  
+            custom_attributes: vec![],
         }
     }
 }

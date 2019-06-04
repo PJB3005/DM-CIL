@@ -26,18 +26,5 @@ namespace DM
 
             return x != null;
         }
-
-        /*
-        public static object OpOutput(dynamic a, dynamic b)
-        {
-            if (a is float f)
-            {
-                var i = (int)f;
-                return (float)(i << b);
-            }
-            a.output(b);
-            return null;
-        }
-        */
     }
 }

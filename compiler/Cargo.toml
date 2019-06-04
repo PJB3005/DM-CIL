@@ -2,9 +2,10 @@
 name = "compiler"
 version = "0.1.0"
 authors = ["PJB3005 <pieterjan.briers+git@gmail.com>"]
+edition = "2018"
 
 [dependencies]
-dreammaker = { path = "../../SpacemanDMM/src/dreammaker" }
+dreammaker = { git = "https://github.com/SpaceManiac/SpacemanDMM.git" }
 #bitflags = "1.0"
 structopt = "0.2"
-tempfile = "3.0.3"
+tempfile = "3"

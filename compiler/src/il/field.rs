@@ -12,11 +12,15 @@ pub struct Field {
 
 impl Field {
     pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writeln!(writer, ".field {} {} {} {} '{}'",
-                 self.accessibility,
-                 if self.is_initonly { "initonly" } else { "" },
-                 if self.is_static { "static" } else { "" },
-                 self.type_name, self.name)
+        writeln!(
+            writer,
+            ".field {} {} {} {} '{}'",
+            self.accessibility,
+            if self.is_initonly { "initonly" } else { "" },
+            if self.is_static { "static" } else { "" },
+            self.type_name,
+            self.name
+        )
     }
 }
 

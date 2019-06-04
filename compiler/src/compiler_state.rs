@@ -1,13 +1,13 @@
-use std::fmt;
-use std::collections::HashMap;
-use dreammaker::Location;
 use dreammaker::ast::*;
 use dreammaker::constants::Constant;
+use dreammaker::Location;
+use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct ByondPath {
     segments: Vec<String>,
-    rooted: bool
+    rooted: bool,
 }
 
 impl ByondPath {
@@ -18,7 +18,7 @@ impl ByondPath {
         }
         ByondPath {
             segments: vec,
-            rooted
+            rooted,
         }
     }
 
@@ -31,7 +31,7 @@ impl ByondPath {
             panic!("Can't get the segment count on a zero-length path.");
         }
 
-        &self.segments[self.segments.len()-1]
+        &self.segments[self.segments.len() - 1]
     }
 
     pub fn is_rooted(&self) -> bool {
@@ -46,7 +46,7 @@ impl fmt::Display for ByondPath {
         }
         write!(f, "{}", self.segments.join("/"))
     }
-} 
+}
 
 impl<'a> From<&'a str> for ByondPath {
     fn from(val: &'a str) -> ByondPath {
@@ -65,7 +65,7 @@ impl<'a> From<&'a str> for ByondPath {
 
         ByondPath {
             rooted,
-            segments: vec
+            segments: vec,
         }
     }
 }
@@ -82,7 +82,7 @@ pub struct CompilerType {
     pub path: ByondPath,
     pub children: Vec<String>,
     pub procs: HashMap<String, Proc>,
-    pub special_class: Option<SpecialClass>
+    pub special_class: Option<SpecialClass>,
 }
 
 impl CompilerType {
@@ -91,14 +91,13 @@ impl CompilerType {
             path: path.clone(),
             children: vec![],
             procs: HashMap::new(),
-            special_class: None
+            special_class: None,
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum SpecialClass
-{
+pub enum SpecialClass {
     World,
 }
 
@@ -108,7 +107,7 @@ pub struct Proc {
     pub parameters: Vec<ProcParameter>,
     pub var_arg: bool,
     pub source: ProcSource,
-    pub is_static: bool
+    pub is_static: bool,
 }
 
 impl Proc {
@@ -118,7 +117,7 @@ impl Proc {
             parameters: vec![],
             var_arg: false,
             source,
-            is_static: false
+            is_static: false,
         }
     }
 }
@@ -126,14 +125,14 @@ impl Proc {
 #[derive(Clone, Debug)]
 pub struct ProcParameter {
     pub name: String,
-    pub var_type: VariableType
+    pub var_type: VariableType,
 }
 
 impl ProcParameter {
     pub fn new(name: &str, var_type: VariableType) -> ProcParameter {
         ProcParameter {
             name: name.to_owned(),
-            var_type
+            var_type,
         }
     }
 }
@@ -150,13 +149,13 @@ pub enum StdProc {
     WorldOutput,
     Sin,
     Cos,
-    Unimplemented(String)
+    Unimplemented(String),
 }
 
 #[derive(Clone, Debug)]
 pub enum VariableType {
     Unspecified,
-    Object(ByondPath)
+    Object(ByondPath),
 }
 
 #[derive(Debug, Clone)]
@@ -164,16 +163,19 @@ pub struct GlobalVar {
     pub name: String,
     pub var_type: VariableType,
     pub initializer: Option<VariableInitializer>,
-    pub mutability: VariableMutability
+    pub mutability: VariableMutability,
 }
 
 impl GlobalVar {
-    pub fn new<A>(name: A, var_type: &VariableType) -> GlobalVar where A: AsRef<str> {
+    pub fn new<A>(name: A, var_type: &VariableType) -> GlobalVar
+    where
+        A: AsRef<str>,
+    {
         GlobalVar {
             name: name.as_ref().to_owned(),
             var_type: var_type.clone(),
             initializer: None,
-            mutability: VariableMutability::Normal
+            mutability: VariableMutability::Normal,
         }
     }
 }
@@ -188,5 +190,5 @@ pub enum VariableInitializer {
 pub enum VariableMutability {
     Normal,
     Readonly,
-    Constant
+    Constant,
 }

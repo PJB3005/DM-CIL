@@ -1,27 +1,18 @@
-extern crate dreammaker;
-//#[macro_use]
-//extern crate bitflags;
-#[macro_use]
-extern crate structopt;
-extern crate tempfile;
-
+use dreammaker::{FileId, Location};
 use std::fmt;
-use dreammaker::Location;
-use dreammaker as dm;
-use dm::FILEID_BUILTINS;
 use std::fs::File;
 use std::path::PathBuf;
 use std::process::Command;
 
-mod dm_std;
-mod il;
-mod dmstate;
-mod proc_transpiler;
 mod compiler_state;
+mod dm_std;
+mod dmstate;
+mod il;
+mod proc_transpiler;
 
+use compiler_state::*;
 use dmstate::DMState;
 use il::*;
-use compiler_state::*;
 
 use structopt::StructOpt;
 
@@ -31,15 +22,14 @@ fn main() -> std::io::Result<()> {
 
     let state = DMState::load(&path)?;
 
-    if opt.print_annotations {
-        for annotation in state.get_all_annotations() {
-            println!("{:?}", annotation);
-        }
-    }
-
     let compiler_state = create_everything(&state);
 
-    let mut asm = Assembly::new(path.file_stem().and_then(|s| s.to_str()).unwrap().to_owned());
+    let mut asm = Assembly::new(
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap()
+            .to_owned(),
+    );
 
     write_everything(&mut asm, &state, &compiler_state);
 
@@ -48,7 +38,7 @@ fn main() -> std::io::Result<()> {
     handle.flush()?;
 
     if opt.noassemble {
-        return Ok(())
+        return Ok(());
     }
 
     let out_path = if let Some(out_path) = &opt.output {
@@ -63,19 +53,17 @@ fn main() -> std::io::Result<()> {
     output_arg.push(out_path.as_os_str());
 
     let status = Command::new("ilasm")
-                 .arg("/exe")
-                 .arg(output_arg)
-                 .arg(il_path)
-                 .status()?;
+        .arg("/exe")
+        .arg(output_arg)
+        .arg(il_path)
+        .status()?;
 
     if !status.success() {
         panic!("Assembly error!");
     }
 
     if !opt.nopeverify {
-        let status = Command::new("peverify")
-                .arg(out_path)
-                .status()?;
+        let status = Command::new("peverify").arg(out_path).status()?;
 
         if !status.success() {
             panic!("Code validation failed.");
@@ -94,9 +82,6 @@ struct Opt {
 
     #[structopt(short = "o", long = "output")]
     output: Option<String>,
-
-    #[structopt(long = "annotations")]
-    print_annotations: bool,
 
     /// Do not run peverify.exe.
     #[structopt(long = "nopeverify")]
@@ -122,20 +107,25 @@ fn create_everything(dm_state: &DMState) -> CompilerState {
     let tree_root = tree.root().get();
 
     for (name, var) in &tree_root.vars {
-        let declaration = var.declaration.as_ref().expect("Global vars should have a declaration, right?");
+        let declaration = var
+            .declaration
+            .as_ref()
+            .expect("Global vars should have a declaration, right?");
         let value = &var.value;
         let var_type = if declaration.var_type.type_path.len() == 0 {
             VariableType::Unspecified
         } else {
             VariableType::Object(ByondPath::new(&declaration.var_type.type_path, true))
         };
-        
+
         let initializer = if let Some(constant) = &value.constant {
             Some(VariableInitializer::Constant(constant.clone()))
         } else if let Some(expr) = &value.expression {
             Some(VariableInitializer::Expression(expr.clone()))
-        } else { None };
-        
+        } else {
+            None
+        };
+
         let mut global_var = GlobalVar::new(&name, &var_type);
         global_var.initializer = initializer;
         if declaration.var_type.is_const {
@@ -152,7 +142,7 @@ fn create_everything(dm_state: &DMState) -> CompilerState {
 
         let value = &proc_type.value[0];
 
-        let source = if value.location.file == FILEID_BUILTINS {
+        let source = if value.location.file == FileId::builtins() {
             if !state.global_procs.contains_key(name) {
                 ProcSource::Std(StdProc::Unimplemented(name.clone()))
             } else {
@@ -166,8 +156,8 @@ fn create_everything(dm_state: &DMState) -> CompilerState {
 
         let mut global_proc = Proc::new(&name, source);
         for param in &value.parameters {
-            let var_type = if param.path.len() > 0 {
-                VariableType::Object(ByondPath::new(&param.path, true))
+            let var_type = if param.var_type.type_path.len() > 0 {
+                VariableType::Object(ByondPath::new(&param.var_type.type_path, true))
             } else {
                 VariableType::Unspecified
             };
@@ -185,28 +175,23 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
     // Create externs.
     {
         let externs = asm.get_externs_mut();
-        externs.push("mscorlib {
-.publickeytoken = (B7 7A 5C 56 19 34 E0 89 )
-.ver 4:0:0:0
-}".to_owned());
-        externs.push("System.Core
-{
-  .publickeytoken = (B7 7A 5C 56 19 34 E0 89 )
-  .ver 4:0:0:0
-}".to_owned());
+        externs.push("mscorlib".to_owned());
+        externs.push("System.Core".to_owned());
         // We use C#'s dynamic system.
         // Even though we're not C#.
         // What're you gonna do about it?
-        externs.push("Microsoft.CSharp
-{
-  .publickeytoken = (B0 3F 5F 7F 11 D5 0A 3A )
-  .ver 4:0:0:0
-}".to_owned());
-        externs.push("DM {}".to_owned());
+        externs.push("Microsoft.CSharp".to_owned());
+        externs.push("DM".to_owned());
     }
 
     let mut stack = vec![];
-    let mut class_root = Class::new("byond_root".to_owned(), ClassAccessibility::Public, None, "byond_root".to_owned(), false);
+    let mut class_root = Class::new(
+        "byond_root".to_owned(),
+        ClassAccessibility::Public,
+        None,
+        "byond_root".to_owned(),
+        false,
+    );
     stack.push("byond_root".to_owned());
 
     // Create global vars.
@@ -231,7 +216,14 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
         code.instruction(Instruction::call("object byond_root::main()".into()));
         code.instruction(Instruction::pop);
         code.instruction(Instruction::ret);
-        let mut entry_point = Method::new("<>EntryPoint".into(), "void".into(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, code, true);
+        let mut entry_point = Method::new(
+            "<>EntryPoint".into(),
+            "void".into(),
+            MethodAccessibility::Public,
+            MethodVirtuality::NotVirtual,
+            code,
+            true,
+        );
         entry_point.is_entry_point = true;
         entry_point.maxstack = 1;
         class_root.insert_method(entry_point);
@@ -240,52 +232,52 @@ fn write_everything(asm: &mut Assembly, dm_state: &DMState, compiler_state: &Com
     for (name, global_proc) in &compiler_state.global_procs {
         let method = match &global_proc.source {
             ProcSource::Std(std) => Ok(dm_std::create_std_proc(std)),
-            ProcSource::Code(_loc) => {
-                proc_transpiler::create_proc(&global_proc, &mut class_root, &name, true, dm_state, &compiler_state)
-            },
+            ProcSource::Code(_loc) => proc_transpiler::create_proc(
+                &global_proc,
+                &mut class_root,
+                &name,
+                true,
+                dm_state,
+                &compiler_state,
+            ),
         };
 
         match method {
-            Ok(method) => {class_root.insert_method(method);},
-            Err(error) => println!("ERROR in proc {}: {}", name, error)
+            Ok(method) => {
+                class_root.insert_method(method);
+            }
+            Err(error) => println!("ERROR in proc {}: {}", name, error),
         };
     }
 
-    for (_path, compiler_type) in compiler_state.types.iter().filter(|(path, _)| path.segment_count() == 1) {
+    for (_path, compiler_type) in compiler_state
+        .types
+        .iter()
+        .filter(|(path, _)| path.segment_count() == 1)
+    {
         let class = create_type(asm, compiler_type, compiler_state, dm_state, &mut stack);
         class_root.insert_child_class(class);
     }
 
-    /*
-    create_vars(root, &mut class_root);
-    for (name, typeproc) in &root.procs {
-        let method = if let Some(ProcDeclaration { location: Location { file: FILEID_BUILTINS, .. }, .. }) = typeproc.declaration {
-            dm_std::create_std_proc(name)
-        } else {
-            proc_transpiler::create_proc(typeproc, &mut class_root, &name, true, dm_state)
-        };
-
-        class_root.insert_method(method);
-    }
-
-    for child in root.children() {
-        create_node(asm, &mut class_root, dm_state, child, &mut stack);
-    }
-
-    dm_std::create_world_class(&mut class_root);
-    */
-
     asm.get_classes_mut().push(class_root);
 }
 
-fn create_type(_asm: &mut Assembly, compiler_type: &CompilerType, compiler_state: &CompilerState, dm_state: &DMState, type_stack: &mut Vec<String>) -> Class {
+fn create_type(
+    _asm: &mut Assembly,
+    compiler_type: &CompilerType,
+    compiler_state: &CompilerState,
+    dm_state: &DMState,
+    type_stack: &mut Vec<String>,
+) -> Class {
     let parent_type_name = type_stack.join("/");
     let name = compiler_type.path.last_segment();
-    let mut class = Class::new(name.into(),
-                               ClassAccessibility::NestedPublic,
-                               Some(parent_type_name.clone()),
-                               format!("{}/{}", parent_type_name, name),
-                               false);
+    let mut class = Class::new(
+        name.into(),
+        ClassAccessibility::NestedPublic,
+        Some(parent_type_name.clone()),
+        format!("{}/{}", parent_type_name, name),
+        false,
+    );
 
     // Make stock .ctor.
     let ctor = dm_std::create_stock_ctor(&parent_type_name);
@@ -294,79 +286,30 @@ fn create_type(_asm: &mut Assembly, compiler_type: &CompilerType, compiler_state
     for (name, child_proc) in &compiler_type.procs {
         let method = match &child_proc.source {
             ProcSource::Std(std) => Ok(dm_std::create_std_proc(std)),
-            ProcSource::Code(_loc) => {
-                proc_transpiler::create_proc(&child_proc, &mut class, &name, true, dm_state, &compiler_state)
-            },
+            ProcSource::Code(_loc) => proc_transpiler::create_proc(
+                &child_proc,
+                &mut class,
+                &name,
+                true,
+                dm_state,
+                &compiler_state,
+            ),
         };
 
         match method {
-            Ok(method) => {class.insert_method(method);},
-            Err(error) => println!("ERROR in proc {}: {}", name, error)
+            Ok(method) => {
+                class.insert_method(method);
+            }
+            Err(error) => println!("ERROR in proc {}: {}", name, error),
         };
     }
 
     type_stack.push(name.into());
-/*
-    for child in noderef.children() {
-        create_class(asm, &mut class, state, child, &mut type_stack);
-    }
-*/
 
     type_stack.pop();
 
     class
 }
-
-/*
-fn create_node(asm: &mut Assembly, parent: &mut Class, state: &DMState, noderef: TypeRef, mut type_stack: &mut Vec<String>) {
-    // NOTE: parent is for the HIERARCHY, NOT inheritance.
-
-    let node = noderef.get();
-    // TODO: Handle DM parent_type.
-    let parent_type_name = type_stack.join("/");
-    //println!("name: '{}' stack: {}", node.name, &parent_type_name);
-    let mut class = Class::new(node.name.clone(),
-                               ClassAccessibility::NestedPublic,
-                               Some(parent_type_name.clone()),
-                               format!("{}/{}", parent_type_name, node.name),
-                               false);
-
-    create_vars(noderef, &mut class);
-
-    for (name, _) in &node.procs {
-        //println!("{}/{}: {}", parent_type_name, node.name, name);
-
-        let mut instructions = InstructionBlob::default();
-        instructions.not_implemented("The compiler is too simple to compile this proc.");
-
-        let method = Method::new(name.to_owned(), "object".to_owned(), MethodAccessibility::Public, MethodVirtuality::VirtualNewSlot, instructions, false);
-        class.insert_method(method);
-    }
-
-    type_stack.push(node.name.clone());
-
-    for child in noderef.children() {
-        create_node(asm, &mut class, state, child, &mut type_stack);
-    }
-
-    type_stack.pop();
-
-    parent.insert_child_class(class);
-}
-
-fn create_vars(node: TypeRef, class: &mut Class) {
-    for (name, typevar) in &node.vars {
-        let mut field = Field::default();
-        field.name = name.to_owned();
-        field.type_name = "object".to_owned();
-        if let Some(decl) = &typevar.declaration {
-            field.is_static = decl.var_type.is_static;
-        }
-        field.accessibility = FieldAccessibility::Public;
-        class.insert_field(field);
-    }
-}
-*/
 
 fn get_il_file(opt: &Opt) -> std::io::Result<(PathBuf, Box<std::io::Write>)> {
     if let Some(il_path) = &opt.il_path {
@@ -380,7 +323,10 @@ fn get_il_file(opt: &Opt) -> std::io::Result<(PathBuf, Box<std::io::Write>)> {
     }
 }
 
-pub fn compiler_warning<A>(string: A) where A : AsRef<str> {
+pub fn compiler_warning<A>(string: A)
+where
+    A: AsRef<str>,
+{
     println!("WARNING: {}", string.as_ref());
 }
 
@@ -391,12 +337,15 @@ pub struct CompilerError {
     pub message: String,
 }
 
-impl<A> From<A> for CompilerError where A : AsRef<str> {
+impl<A> From<A> for CompilerError
+where
+    A: AsRef<str>,
+{
     fn from(string_ref: A) -> CompilerError {
         CompilerError {
             location: None,
             end_location: None,
-            message: string_ref.as_ref().to_owned()
+            message: string_ref.as_ref().to_owned(),
         }
     }
 }

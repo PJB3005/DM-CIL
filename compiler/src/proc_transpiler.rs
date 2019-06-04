@@ -1,15 +1,21 @@
 //! The workhorse of the compiler.
 //! Compiles the a BYOND AST proc into a CIL method.
-use CompilerError;
+use crate::compiler_state::*;
+use crate::dmstate::DMState;
+use crate::il::*;
+use crate::CompilerError;
+use dreammaker::ast::*;
+use dreammaker::objtree::Code;
 use std::collections::HashMap;
-use dm::ast::*;
-use dm::annotation::Annotation;
-use super::il::*;
-use super::dmstate::DMState;
-use super::compiler_state::*;
 
-pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, is_static: bool,
-                          state: &DMState, compiler_state: &CompilerState) -> Result<Method, CompilerError> {
+pub(crate) fn create_proc(
+    the_proc: &Proc,
+    class: &mut Class,
+    proc_name: &str,
+    is_static: bool,
+    state: &DMState,
+    compiler_state: &CompilerState,
+) -> Result<Method, CompilerError> {
     if let Some(code) = get_proc_body_details(the_proc, state) {
         let mut data = TranspilerData {
             total_locals: 1,
@@ -33,21 +39,30 @@ pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, i
             ins.instruction(Instruction::ldarg(arg));
             ins.instruction(Instruction::stloc(local));
         }
-        
+
         // Load null into . (default return value.)
         ins.instruction(Instruction::ldnull);
         ins.instruction(Instruction::stloc0);
         for statement in code {
-            write_statement(statement, &mut data, &mut ins)?;
+            write_statement(&statement.elem, &mut data, &mut ins)?;
         }
 
         ins.instruction(Instruction::ldloc0);
         ins.instruction(Instruction::ret);
 
-        let mut method = Method::new(proc_name.to_owned(), "object".into(), MethodAccessibility::Public, MethodVirtuality::NotVirtual, ins, is_static);
+        let mut method = Method::new(
+            proc_name.to_owned(),
+            "object".into(),
+            MethodAccessibility::Public,
+            MethodVirtuality::NotVirtual,
+            ins,
+            is_static,
+        );
 
         for param in &the_proc.parameters {
-            method.params.push(MethodParameter::new(&param.name, "object"));
+            method
+                .params
+                .push(MethodParameter::new(&param.name, "object"));
         }
 
         for _ in 0..data.total_locals {
@@ -60,7 +75,14 @@ pub(crate) fn create_proc(the_proc: &Proc, class: &mut Class, proc_name: &str, i
     }
 }
 
-pub(crate) fn evaluate_initializer(expression: &Expression, class: &mut Class, proc_name: &str, dm_state: &DMState, compiler_state: &CompilerState, blob: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
+pub(crate) fn evaluate_initializer(
+    expression: &Expression,
+    class: &mut Class,
+    proc_name: &str,
+    dm_state: &DMState,
+    compiler_state: &CompilerState,
+    blob: &mut InstructionBlob,
+) -> Result<VariableType, CompilerError> {
     let mut data = TranspilerData {
         total_locals: 0,
         locals: vec![],
@@ -70,7 +92,7 @@ pub(crate) fn evaluate_initializer(expression: &Expression, class: &mut Class, p
         is_static: true,
         proc_name,
         class,
-        loop_labels: vec![]
+        loop_labels: vec![],
     };
 
     evaluate_expression(expression, &mut data, blob)
@@ -93,11 +115,13 @@ impl<'a> TranspilerData<'a> {
     pub fn get_meta_class(&mut self) -> &mut Class {
         let name = format!("<>_meta_{}", self.proc_name);
         if !self.class.has_child_class(&name) {
-            let class = Class::new(name.clone(),
-                                   ClassAccessibility::NestedPrivate,
-                                   None,
-                                   format!("{}/'{}'", self.class.get_full_name(), name),
-                                   true);
+            let class = Class::new(
+                name.clone(),
+                ClassAccessibility::NestedPrivate,
+                None,
+                format!("{}/'{}'", self.class.get_full_name(), name),
+                true,
+            );
             self.class.insert_child_class(class);
         }
 
@@ -119,7 +143,7 @@ impl<'a> TranspilerData<'a> {
     /// Adds a local variable with specified name to this scope.
     pub fn add_local(&mut self, name: &str) -> u16 {
         // NOTE: Local 0 is . (default return value).
-        let top_pos = self.locals.len()-1;
+        let top_pos = self.locals.len() - 1;
         let top = &mut self.locals[top_pos];
         let new_local_id = self.total_locals;
         self.total_locals += 1;
@@ -169,7 +193,7 @@ impl<'a> TranspilerData<'a> {
             return None;
         }
 
-        Some(&self.loop_labels[self.loop_labels.len()-1].1)
+        Some(&self.loop_labels[self.loop_labels.len() - 1].1)
     }
 
     pub fn get_loop_repeat_label(&self) -> Option<&str> {
@@ -177,25 +201,32 @@ impl<'a> TranspilerData<'a> {
             return None;
         }
 
-        Some(&self.loop_labels[self.loop_labels.len()-1].0)
+        Some(&self.loop_labels[self.loop_labels.len() - 1].0)
     }
 }
 
-fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<(), CompilerError> {
+fn write_statement(
+    statement: &Statement,
+    data: &mut TranspilerData,
+    ins: &mut InstructionBlob,
+) -> Result<(), CompilerError> {
     // RULE: when this function is done, the stack is the same as before.
     match statement {
         Statement::Expr(exp) => {
             evaluate_expression(exp, data, ins)?;
             ins.instruction(Instruction::pop);
-        },
+        }
         Statement::Var(VarStatement { name, value, .. }) => {
             let idx = data.add_local(name);
             if let Some(initializer) = value {
                 evaluate_expression(initializer, data, ins)?;
                 ins.instruction(Instruction::stloc(idx));
             }
-        },
-        Statement::If(ifs, else_statements) => {
+        }
+        Statement::If {
+            arms: ifs,
+            else_arm: else_statements,
+        } => {
             let uniq = data.get_uniq();
             // The label AFTER the else clause.
             let end_label = format!("ip_{}", uniq);
@@ -212,7 +243,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
                 evaluate_truthy(ins);
                 // There is another else if.
                 if i != ifcount - 1 {
-                    ins.instruction(Instruction::brfalse(format!("ic_{}_{}", uniq, i+1)));
+                    ins.instruction(Instruction::brfalse(format!("ic_{}_{}", uniq, i + 1)));
                 } else {
                     if else_statements.is_some() {
                         ins.instruction(Instruction::brfalse(else_label.clone()));
@@ -222,7 +253,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
                 }
 
                 for statement in statements {
-                    write_statement(statement, data, ins)?;
+                    write_statement(&statement.elem, data, ins)?;
                 }
 
                 ins.instruction(Instruction::br(end_label.clone()));
@@ -231,16 +262,19 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             if let Some(statements) = else_statements {
                 ins.label(else_label);
                 ins.instruction(Instruction::nop);
-                
+
                 for statement in statements {
-                    write_statement(statement, data, ins)?;
+                    write_statement(&statement.elem, data, ins)?;
                 }
             }
 
             ins.label(end_label);
             ins.instruction(Instruction::nop);
-        },
-        Statement::While(exp, statements) => {
+        }
+        Statement::While {
+            condition: exp,
+            block: statements,
+        } => {
             let uniq = data.get_uniq();
             let test_label = format!("w_{}", uniq);
             let exit_label = format!("e_{}", uniq);
@@ -253,7 +287,7 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             ins.instruction(Instruction::brfalse(exit_label.clone()));
 
             for statement in statements {
-                write_statement(statement, data, ins)?;
+                write_statement(&statement.elem, data, ins)?;
             }
 
             ins.instruction(Instruction::br(test_label));
@@ -262,8 +296,11 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             ins.instruction(Instruction::nop);
 
             data.pop_loop_scope();
-        },
-        Statement::DoWhile(statements, exp) => {
+        }
+        Statement::DoWhile {
+            block: statements,
+            condition: exp,
+        } => {
             let uniq = data.get_uniq();
             let test_label = format!("dw_{}", uniq);
             let exit_label = format!("de_{}", uniq);
@@ -273,43 +310,41 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
             ins.label(repeat_label.clone());
 
             for statement in statements {
-                write_statement(statement, data, ins)?;
+                write_statement(&statement.elem, data, ins)?;
             }
 
             ins.label(test_label);
             ins.instruction(Instruction::nop);
             evaluate_expression(exp, data, ins)?;
-            ins.instruction(Instruction::call("bool class [DM]DM.DmInternal::Truthy(object)".to_owned()));
+            ins.instruction(Instruction::call(
+                "bool class [DM]DM.DmInternal::Truthy(object)".to_owned(),
+            ));
             ins.instruction(Instruction::brtrue(repeat_label));
             ins.label(exit_label);
             ins.instruction(Instruction::nop);
-        },
+        }
         Statement::Break(Some(_)) | Statement::Continue(Some(_)) => {
             return Err("Labelled loop flow control is not implemented yet.".into());
-        },
+        }
         Statement::Break(None) => {
             if let Some(label) = data.get_loop_exit_label() {
                 ins.instruction(Instruction::br(label.to_owned()));
-            }
-            else
-            {
+            } else {
                 return Err("Encountered break outside loop".into());
             }
-        },
+        }
         Statement::Continue(None) => {
             if let Some(label) = data.get_loop_repeat_label() {
                 ins.instruction(Instruction::br(label.to_owned()));
-            }
-            else
-            {
+            } else {
                 return Err("Encountered break outside loop".into());
             }
-        },
+        }
         Statement::Return(None) => {
             // Default return value.
             ins.instruction(Instruction::ldloc0);
             ins.instruction(Instruction::ret);
-        },
+        }
         Statement::Return(Some(expr)) => {
             evaluate_expression(&expr, data, ins)?;
             ins.instruction(Instruction::ret);
@@ -322,17 +357,26 @@ fn write_statement(statement: &Statement, data: &mut TranspilerData, ins: &mut I
     Ok(())
 }
 
-fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
+fn evaluate_expression(
+    expression: &Expression,
+    data: &mut TranspilerData,
+    ins: &mut InstructionBlob,
+) -> Result<VariableType, CompilerError> {
     // RULE: when this function is done, ONE extra value on the stack.
     match expression {
-        Expression::Base { unary, term, follow } => {
+        Expression::Base {
+            unary,
+            term,
+            follow,
+        } => {
             let mut term_blob = InstructionBlob::default();
-            let mut term_type = evaluate_term(term, data, &mut term_blob)?;
+            let mut term_type = evaluate_term(&term.elem, data, &mut term_blob)?;
             for follow in follow.iter().rev() {
                 let old_blob = term_blob;
                 term_blob = InstructionBlob::default();
-                term_type = evaluate_follow(follow, term_type, old_blob, data, &mut term_blob)?;
-            };
+                term_type =
+                    evaluate_follow(&follow.elem, term_type, old_blob, data, &mut term_blob)?;
+            }
 
             for _unary in unary.iter().rev() {
                 // TODO: Unary ops.
@@ -340,7 +384,7 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
 
             ins.absord(term_blob);
             return Ok(term_type);
-        },
+        }
         Expression::BinaryOp { op, lhs, rhs } => {
             match op {
                 BinaryOp::Add
@@ -350,7 +394,7 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
                 | BinaryOp::Eq
                 | BinaryOp::NotEq
                 | BinaryOp::Greater
-                | BinaryOp::GreaterEq 
+                | BinaryOp::GreaterEq
                 | BinaryOp::Less
                 | BinaryOp::LessEq
                 | BinaryOp::Mod => {
@@ -363,15 +407,17 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
                         BinaryOp::Eq
                         | BinaryOp::NotEq
                         | BinaryOp::Greater
-                        | BinaryOp::GreaterEq 
+                        | BinaryOp::GreaterEq
                         | BinaryOp::Less
                         | BinaryOp::LessEq => {
-                            ins.instruction(Instruction::unboxany("[mscorlib]System.Boolean".to_owned()));
+                            ins.instruction(Instruction::unboxany(
+                                "[mscorlib]System.Boolean".to_owned(),
+                            ));
                             bool_to_float(data, ins)
-                        },
+                        }
                         _ => {}
                     };
-                },
+                }
                 BinaryOp::And => {
                     let uniq = data.get_uniq();
                     let exit = format!("opand_lhs_false_{}", uniq);
@@ -384,7 +430,7 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
                     evaluate_expression(rhs, data, ins)?;
                     ins.label(exit);
                     ins.instruction(Instruction::nop);
-                },
+                }
                 BinaryOp::Or => {
                     let uniq = data.get_uniq();
                     let exit = format!("opor_lhs_true_{}", uniq);
@@ -397,7 +443,7 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
                     evaluate_expression(rhs, data, ins)?;
                     ins.label(exit);
                     ins.instruction(Instruction::nop);
-                },
+                }
                 BinaryOp::LShift => {
                     let mut arg_blob = InstructionBlob::default();
                     evaluate_expression(lhs, data, &mut arg_blob)?;
@@ -405,17 +451,29 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
                     let invoke = DynamicInvokeType::MemberInvoke {
                         arg_count: 1,
                         expect_return: true,
-                        method_name: "output".to_owned()
+                        method_name: "output".to_owned(),
                     };
                     do_dynamic_invoke(invoke, arg_blob, data, ins);
-                },
+                }
                 _ => {
                     return Err(format!("Unknown op: {:?}", op).into());
-                },
+                }
             };
-        },
-        Expression::AssignOp { op: AssignOp::Assign, lhs, rhs } => {
-            if let Expression::Base { term: Term::Ident(varname), .. } = *lhs.clone() {
+        }
+        Expression::AssignOp {
+            op: AssignOp::Assign,
+            lhs,
+            rhs,
+        } => {
+            if let Expression::Base {
+                term:
+                    Spanned {
+                        elem: Term::Ident(varname),
+                        ..
+                    },
+                ..
+            } = *lhs.clone()
+            {
                 if let Some(idx) = data.get_local(&varname) {
                     evaluate_expression(rhs, data, ins)?;
                     ins.instruction(Instruction::dup);
@@ -426,7 +484,7 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
             } else {
                 return Err("That lvalue is too complex for me.".into());
             }
-        },
+        }
         _ => {
             return Err(format!("Unable to handle expression type: {:?}", expression).into());
         }
@@ -435,7 +493,11 @@ fn evaluate_expression(expression: &Expression, data: &mut TranspilerData, ins: 
     Ok(VariableType::Unspecified)
 }
 
-fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
+fn evaluate_term(
+    term: &Term,
+    data: &mut TranspilerData,
+    ins: &mut InstructionBlob,
+) -> Result<VariableType, CompilerError> {
     // RULE: when this function is done, there is ONE extra value on the stack.
     match term {
         Term::Int(val) => {
@@ -456,6 +518,9 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
             if ident == "src" {
                 ins.instruction(Instruction::ldarg0);
                 Ok(VariableType::Unspecified)
+            } else if ident == "." {
+                ins.instruction(Instruction::ldloc0);
+                Ok(VariableType::Unspecified)
             } else if let Some(idx) = data.get_local(ident) {
                 ins.instruction(Instruction::ldloc(idx));
                 Ok(VariableType::Unspecified)
@@ -465,25 +530,19 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
                 match &global.var_type {
                     VariableType::Object(path) => {
                         ins.instruction(Instruction::castclass(byond_path_to_class(path)));
-                    },
+                    }
                     VariableType::Unspecified => {}
                 };
                 Ok(global.var_type.clone())
             } else {
                 Err(format!("Unknown identifier: {}", &ident).into())
             }
-        },
+        }
         Term::String(val) => {
             ins.instruction(Instruction::ldstr(val.to_owned()));
             Ok(VariableType::Unspecified)
-        },
-        Term::Expr(expr) => {
-            evaluate_expression(expr, data, ins)
-        },
-        Term::ReturnValue => {
-            ins.instruction(Instruction::ldloc0);
-            Ok(VariableType::Unspecified)
-        },
+        }
+        Term::Expr(expr) => evaluate_expression(expr, data, ins),
         Term::Call(name, args) => {
             if !data.is_static {
                 return Err("Unscoped non-static calls are not implemented yet.".into());
@@ -502,19 +561,26 @@ fn evaluate_term(term: &Term, data: &mut TranspilerData, ins: &mut InstructionBl
                 for expr in args {
                     evaluate_expression(expr, data, ins)?;
                 }
-                ins.instruction(Instruction::call(format!("object byond_root::{}({})", name, args_tok)));
+                ins.instruction(Instruction::call(format!(
+                    "object byond_root::{}({})",
+                    name, args_tok
+                )));
                 Ok(VariableType::Unspecified)
             } else {
                 panic!(format!("Method does not exist: {}", name));
             }
-        },
-        t => {
-            Err(format!("Unable to handle term: {:?}", t).into())
         }
+        t => Err(format!("Unable to handle term: {:?}", t).into()),
     }
 }
 
-fn evaluate_follow(follow: &Follow, term_type: VariableType, mut term_blob: InstructionBlob, data: &mut TranspilerData, ins: &mut InstructionBlob) -> Result<VariableType, CompilerError> {
+fn evaluate_follow(
+    follow: &Follow,
+    term_type: VariableType,
+    mut term_blob: InstructionBlob,
+    data: &mut TranspilerData,
+    ins: &mut InstructionBlob,
+) -> Result<VariableType, CompilerError> {
     match follow {
         Follow::Call(_, method_name, args) => {
             for arg in args {
@@ -523,13 +589,18 @@ fn evaluate_follow(follow: &Follow, term_type: VariableType, mut term_blob: Inst
 
             match term_type {
                 VariableType::Unspecified => {
-                    do_dynamic_invoke(DynamicInvokeType::MemberInvoke {
-                        arg_count: args.len() as u16,
-                        expect_return: true,
-                        method_name: method_name.clone()
-                    }, term_blob, data, ins);
+                    do_dynamic_invoke(
+                        DynamicInvokeType::MemberInvoke {
+                            arg_count: args.len() as u16,
+                            expect_return: true,
+                            method_name: method_name.clone(),
+                        },
+                        term_blob,
+                        data,
+                        ins,
+                    );
                     Ok(VariableType::Unspecified)
-                },
+                }
                 VariableType::Object(path) => {
                     if !data.compiler_state.types.contains_key(&path) {
                         return Err("Unable to find type.".into());
@@ -538,7 +609,7 @@ fn evaluate_follow(follow: &Follow, term_type: VariableType, mut term_blob: Inst
                     if !type_instance.procs.contains_key(method_name) {
                         return Err("Unable to find proc.".into());
                     }
-                    
+
                     //let instance_proc = &type_instance.procs[method_name];
                     // oh shit we got it.
                     ins.absord(term_blob);
@@ -553,15 +624,16 @@ fn evaluate_follow(follow: &Follow, term_type: VariableType, mut term_blob: Inst
                             }
                         }
                     }
-                    ins.instruction(Instruction::call(format!("instance object byond_root{}::{}({})", path, method_name, args)));
+                    ins.instruction(Instruction::call(format!(
+                        "instance object byond_root{}::{}({})",
+                        path, method_name, args
+                    )));
 
                     Ok(VariableType::Unspecified)
                 }
             }
-        },
-        a => {
-            Err(format!("Non-call follows not implemented: {:?}", a).into())
         }
+        a => Err(format!("Non-call follows not implemented: {:?}", a).into()),
     }
 }
 
@@ -575,7 +647,12 @@ fn evaluate_follow(follow: &Follow, term_type: VariableType, mut term_blob: Inst
 // So, we need to use C# dynamic. Dynamic does not exist at a CIL level.
 // This monster of a method generates dynamic operations for everything we need.
 // I recommend you to mess around with dynamic on sharplab.io to have the slightest of a grasp what's going on.
-fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, data: &mut TranspilerData, ins: &mut InstructionBlob) {
+fn do_dynamic_invoke(
+    invoke_type: DynamicInvokeType,
+    subblob: InstructionBlob,
+    data: &mut TranspilerData,
+    ins: &mut InstructionBlob,
+) {
     // RULE: when this function is done, there is an extra value on the stack IF the operation should've added one.
     // So basically it depends on what kinda operation's being invoked.
 
@@ -610,7 +687,10 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
             }
         };
         // Callsite`1<call_type> type, because it's used a lot.
-        let call_site_calltype = format!("class [System.Core]System.Runtime.CompilerServices.CallSite`1<{}>", call_type); 
+        let call_site_calltype = format!(
+            "class [System.Core]System.Runtime.CompilerServices.CallSite`1<{}>",
+            call_type
+        );
         meta_class.insert_field(Field {
             name: meta_field_name.clone(),
             type_name: call_site_calltype.clone(),
@@ -618,17 +698,31 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
             is_static: true,
             is_initonly: false,
         });
-        let meta_field_name_full = format!("{} {}::'{}'", call_site_calltype, meta_class.get_full_name(), meta_field_name);
-        (call_type, arg_count, call_site_calltype, meta_field_name_full)
+        let meta_field_name_full = format!(
+            "{} {}::'{}'",
+            call_site_calltype,
+            meta_class.get_full_name(),
+            meta_field_name
+        );
+        (
+            call_type,
+            arg_count,
+            call_site_calltype,
+            meta_field_name_full,
+        )
     };
     // Check if the CallSite`1 is already initialized.
     // If so, skip to the normal execution code.
     ins.instruction(Instruction::ldsfld(meta_field_name_full.clone()));
     ins.instruction(Instruction::brtrue(post_init_label.clone()));
-    
+
     // We're not initialized. Hold onto yer butts.
     // Push CSharpBinderFlags.
-    if let DynamicInvokeType::MemberInvoke { expect_return: false, .. } = &invoke_type {
+    if let DynamicInvokeType::MemberInvoke {
+        expect_return: false,
+        ..
+    } = &invoke_type
+    {
         // ResultDiscarded.
         ins.instruction(Instruction::ldci4(256));
     } else {
@@ -637,11 +731,13 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
     }
 
     match invoke_type {
-        DynamicInvokeType::MemberInvoke { ref method_name, .. } => {
+        DynamicInvokeType::MemberInvoke {
+            ref method_name, ..
+        } => {
             ins.instruction(Instruction::ldstr(method_name.clone()));
             // No generics.
             ins.instruction(Instruction::ldnull);
-        },
+        }
         DynamicInvokeType::BinaryOp(op) => {
             ins.instruction(Instruction::ldci4(match op {
                 // These correspond to System.Linq.Expressions.ExpressionType.
@@ -658,8 +754,7 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
                 BinaryOp::Mod => 25,
                 _ => panic!("Unsupported binary op!"),
             }));
-        },
-
+        }
         /*
         ref a => {
             println!("{:?}", a);
@@ -671,10 +766,12 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
     // Push System.Type.
     ins.instruction(Instruction::ldtoken(data.class.get_full_name().to_owned()));
     ins.instruction(Instruction::call("class [mscorlib]System.Type [mscorlib]System.Type::GetTypeFromHandle(valuetype [mscorlib]System.RuntimeTypeHandle)".to_owned()));
-    
+
     // Create CSharpArgumentInfo array.
-    ins.instruction(Instruction::ldci4((arg_count as i32)+1));
-    ins.instruction(Instruction::newarr("[Microsoft.CSharp]Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo".to_owned()));
+    ins.instruction(Instruction::ldci4((arg_count as i32) + 1));
+    ins.instruction(Instruction::newarr(
+        "[Microsoft.CSharp]Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo".to_owned(),
+    ));
 
     for i in 0..=arg_count {
         ins.instruction(Instruction::dup);
@@ -705,25 +802,41 @@ fn do_dynamic_invoke(invoke_type: DynamicInvokeType, subblob: InstructionBlob, d
     // Cool we're going to call it now.
     ins.label(post_init_label);
     ins.instruction(Instruction::ldsfld(meta_field_name_full.clone()));
-    ins.instruction(Instruction::ldfld(format!("!0 {}::Target", call_site_calltype)));
+    ins.instruction(Instruction::ldfld(format!(
+        "!0 {}::Target",
+        call_site_calltype
+    )));
     ins.instruction(Instruction::ldsfld(meta_field_name_full.clone()));
-    
+
     // Load up arguments however the caller wants.
     ins.absord(subblob);
-    
+
     match invoke_type {
-        DynamicInvokeType::MemberInvoke { expect_return, arg_count, .. } => {
+        DynamicInvokeType::MemberInvoke {
+            expect_return,
+            arg_count,
+            ..
+        } => {
             let ret_type = if expect_return {
-                format!("!{}", arg_count+2)
+                format!("!{}", arg_count + 2)
             } else {
                 "void".to_owned()
             };
 
-            let invoke_args = (0..=arg_count+1).map(|i| format!("!{}", i)).collect::<Vec<String>>().join(", ");
-            ins.instruction(Instruction::callvirt(format!("instance {} {}::Invoke({})", ret_type, call_type, invoke_args)));
+            let invoke_args = (0..=arg_count + 1)
+                .map(|i| format!("!{}", i))
+                .collect::<Vec<String>>()
+                .join(", ");
+            ins.instruction(Instruction::callvirt(format!(
+                "instance {} {}::Invoke({})",
+                ret_type, call_type, invoke_args
+            )));
         }
         DynamicInvokeType::BinaryOp(_) => {
-            ins.instruction(Instruction::callvirt(format!("instance !3 {}::Invoke(!0, !1, !2)", call_type)));
+            ins.instruction(Instruction::callvirt(format!(
+                "instance !3 {}::Invoke(!0, !1, !2)",
+                call_type
+            )));
         }
     }
 }
@@ -738,29 +851,22 @@ enum DynamicInvokeType {
     BinaryOp(BinaryOp),
 }
 
-fn get_proc_body_details<'a>(the_proc: &Proc, state: &'a DMState) -> Option<&'a[Statement]> {
-    let loc = match the_proc.source {
-        ProcSource::Code(loc) => loc,
-        _ => panic!("Don't use proc body details on STD procs!"),
-    };
-    for anno in state.get_annotations(loc) {
-        if let (range, Annotation::ProcHeader(..)) = anno {
-            let mut end = range.end;
-            end.column += 1;
-            for anno in state.get_annotations(end) {
-                if let (_, Annotation::ProcBodyDetails(code)) = anno {
-                    //println!("{:?}", anno);
-                    return Some(code);
-                }
-            }
-        }
-    }
+fn get_proc_body_details<'a>(the_proc: &Proc, state: &'a DMState) -> Option<&'a Block> {
+    let root = state.get_tree().root().get();
+    let proc = &root.procs[&the_proc.name];
 
-    None
+    let code = &proc.value[0].code;
+
+    match code {
+        Code::Present(block) => Some(block),
+        _ => None,
+    }
 }
 
 fn evaluate_truthy(ins: &mut InstructionBlob) {
-    ins.instruction(Instruction::call("bool class [DM]DM.DmInternal::Truthy(object)".to_owned()));
+    ins.instruction(Instruction::call(
+        "bool class [DM]DM.DmInternal::Truthy(object)".to_owned(),
+    ));
 }
 
 /// Writes in a conversion from a bool to a float.

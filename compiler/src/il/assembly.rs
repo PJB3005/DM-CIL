@@ -1,5 +1,5 @@
-use std::io;
 use super::Class;
+use std::io;
 
 pub struct Assembly {
     name: String,
@@ -39,10 +39,10 @@ impl Assembly {
 
     pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         for extern_assembly in &self.externs {
-            writeln!(writer, ".assembly extern {}", extern_assembly)?;
+            writeln!(writer, ".assembly extern {} {{}}", extern_assembly)?;
         }
 
-        writeln!(writer, ".assembly '{0}' {{}}\n.module {0}.dll", self.name)?;
+        writeln!(writer, ".assembly '{0}' {{}}", self.name)?;
 
         for class in &self.classes {
             class.write(writer)?;

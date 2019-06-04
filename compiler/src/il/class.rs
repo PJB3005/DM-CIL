@@ -1,8 +1,8 @@
 use super::*;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use std::collections::HashMap;
 
 pub struct Class {
     pub name: String,
@@ -20,7 +20,13 @@ pub struct Class {
 
 #[allow(dead_code)]
 impl Class {
-    pub fn new(name: String, accessibility: ClassAccessibility, parent: Option<String>, full_name: String, is_static: bool) -> Class {
+    pub fn new(
+        name: String,
+        accessibility: ClassAccessibility,
+        parent: Option<String>,
+        full_name: String,
+        is_static: bool,
+    ) -> Class {
         Class {
             name,
             full_name,
@@ -82,12 +88,23 @@ impl Class {
     }
 
     pub fn write<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writeln!(writer, ".class {} auto ansi {} {} '{}' extends {} {{",
-                 self.accessibility,
-                 if self.is_static { "abstract sealed"} else { "" },
-                 if self.beforefieldinit { "beforefieldinit"} else { "" },
-                 self.name,
-                 self.parent)?;
+        writeln!(
+            writer,
+            ".class {} auto ansi {} {} '{}' extends {} {{",
+            self.accessibility,
+            if self.is_static {
+                "abstract sealed"
+            } else {
+                ""
+            },
+            if self.beforefieldinit {
+                "beforefieldinit"
+            } else {
+                ""
+            },
+            self.name,
+            self.parent
+        )?;
 
         let mut keys = self.fields.keys().collect::<Vec<&String>>();
         keys.sort_unstable();
